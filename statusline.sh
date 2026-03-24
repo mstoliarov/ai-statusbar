@@ -79,12 +79,16 @@ ctx_bar=$(make_bar "$used_pct_int")
 ctx_size=$(echo "$input" | "$JQ" -r '.context_window.max_tokens // 200000')
 ctx_size_fmt=$(fmt_num "$ctx_size")
 
+# Token counts — read directly from statusLine JSON (most accurate)
+tok_in=$(echo "$input" | "$JQ" -r '.context_window.total_input_tokens // 0')
+tok_out=$(echo "$input" | "$JQ" -r '.context_window.total_output_tokens // 0')
+tok_total=$(( tok_in + tok_out ))
+tok_fmt=$(fmt_num "$tok_total")
+
 # --- State.json ---
 STATE="$HOME/.ai-statusbar/state.json"
 requests=0
 lines=0
-session_tokens_in=0
-session_tokens_out=0
 today_tokens=0
 week_tokens=0
 daily_limit=1000000
@@ -93,17 +97,11 @@ weekly_limit=5000000
 if [ -f "$STATE" ]; then
   requests=$("$JQ" -r '.requests_count // 0' "$STATE" 2>/dev/null || echo 0)
   lines=$("$JQ" -r '.lines_count // 0' "$STATE" 2>/dev/null || echo 0)
-  session_tokens_in=$("$JQ" -r '.tokens.input // 0' "$STATE" 2>/dev/null || echo 0)
-  session_tokens_out=$("$JQ" -r '.tokens.output // 0' "$STATE" 2>/dev/null || echo 0)
   today_tokens=$("$JQ" -r '.usage.today_tokens // 0' "$STATE" 2>/dev/null || echo 0)
   week_tokens=$("$JQ" -r '.usage.week_tokens // 0' "$STATE" 2>/dev/null || echo 0)
   daily_limit=$("$JQ" -r '.usage.daily_limit // 1000000' "$STATE" 2>/dev/null || echo 1000000)
   weekly_limit=$("$JQ" -r '.usage.weekly_limit // 5000000' "$STATE" 2>/dev/null || echo 5000000)
 fi
-
-# Total session tokens
-session_total=$(( session_tokens_in + session_tokens_out ))
-session_tok_fmt=$(fmt_num "$session_total")
 
 # --- Usage/d ---
 day_pct=$(awk "BEGIN { v = int($today_tokens * 100 / $daily_limit); print (v > 100 ? 100 : v) }")
@@ -142,8 +140,8 @@ out+="${DIM}usage/d${RESET} ${BLUE}${day_bar} ${day_pct}% / ${day_limit_fmt}${RE
 # usage/w — blue
 out+="${DIM}usage/w${RESET} ${BLUE}${week_bar} ${week_pct}% / ${week_limit_fmt}${RESET}${SEP}"
 
-# Token counter
-out+="${DIM}tok${RESET} ${CYAN}${session_tok_fmt}${RESET}${SEP}"
+# Token counter (from statusLine JSON — live, accurate)
+out+="${DIM}tok${RESET} ${CYAN}${tok_fmt}${RESET}${SEP}"
 
 # Requests counter
 out+="${BLUE}🔧 ${requests} req${RESET}${SEP}"
