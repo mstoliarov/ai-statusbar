@@ -87,6 +87,13 @@ tok_fmt=$(fmt_num "$tok_total")
 
 # --- State.json ---
 STATE="$HOME/.ai-statusbar/state.json"
+
+# Save live token counts to state.json so stop.sh can use them for daily/weekly accumulation
+if [ "$tok_total" -gt 0 ] && [ -f "$STATE" ]; then
+  "$JQ" --argjson ti "$tok_in" --argjson to "$tok_out" \
+    '.tokens.input = $ti | .tokens.output = $to' \
+    "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
+fi
 requests=0
 lines=0
 today_tokens=0
@@ -117,7 +124,7 @@ week_used_fmt=$(fmt_num "$week_tokens")
 
 # --- Build output ---
 SEP="${DIM} │ ${RESET}"
-out=""
+out="\n\n"
 
 # Folder + git
 out+="${BOLD}${CYAN}${folder}${RESET}"

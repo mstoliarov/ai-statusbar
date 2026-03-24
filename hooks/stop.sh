@@ -8,14 +8,20 @@ STATE="$HOME/.ai-statusbar/state.json"
 
 INPUT=$(cat)
 
-# Extract fields — Claude Code Stop hook payload
-TOKENS_IN=$(echo "$INPUT" | "$JQ" -r '.usage.input_tokens // .session_stats.input_tokens // 0')
-TOKENS_OUT=$(echo "$INPUT" | "$JQ" -r '.usage.output_tokens // .session_stats.output_tokens // 0')
+# Extract model from Stop hook payload
 MODEL=$(echo "$INPUT" | "$JQ" -r '.model // ""')
 
-# Fallback: try top-level keys
-[[ "$TOKENS_IN" == "0" ]] && TOKENS_IN=$(echo "$INPUT" | "$JQ" -r '.input_tokens // 0')
-[[ "$TOKENS_OUT" == "0" ]] && TOKENS_OUT=$(echo "$INPUT" | "$JQ" -r '.output_tokens // 0')
+# Token counts — read from state.json (saved by statusline.sh from live JSON, more reliable than Stop payload)
+TOKENS_IN=$("$JQ" -r '.tokens.input // 0' "$STATE")
+TOKENS_OUT=$("$JQ" -r '.tokens.output // 0' "$STATE")
+
+# Fallback: try Stop hook payload fields if state has 0
+if [[ "$TOKENS_IN" == "0" ]]; then
+  TOKENS_IN=$(echo "$INPUT" | "$JQ" -r '.usage.input_tokens // .session_stats.input_tokens // .input_tokens // 0')
+fi
+if [[ "$TOKENS_OUT" == "0" ]]; then
+  TOKENS_OUT=$(echo "$INPUT" | "$JQ" -r '.usage.output_tokens // .session_stats.output_tokens // .output_tokens // 0')
+fi
 
 TOTAL_TOKENS=$(( TOKENS_IN + TOKENS_OUT ))
 
