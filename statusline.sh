@@ -115,9 +115,9 @@ week_bar=$(make_bar "$week_pct")
 week_limit_fmt=$(fmt_num "$weekly_limit")
 week_used_fmt=$(fmt_num "$week_tokens")
 
-# --- Build output (newline prefix to appear below plan mode / accept edits) ---
+# --- Build output ---
 SEP="${DIM} │ ${RESET}"
-out="\n"
+out=""
 
 # Folder + git
 out+="${BOLD}${CYAN}${folder}${RESET}"
