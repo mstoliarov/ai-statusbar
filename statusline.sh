@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Claude Code inline status line — progress bar + counters
-# Part of ai-statusbar plugin: https://github.com/maxstab/ai-statusbar
+# Claude Code inline status line — progress bar + counters + usage
+# Part of ai-statusbar plugin: https://github.com/mstoliarov/ai-statusbar
 # Receives JSON via stdin from Claude Code
 
 export PATH="$HOME/bin:$PATH"
@@ -30,6 +30,15 @@ make_bar() {
   printf "%s" "$bar"
 }
 
+# Color by percentage thresholds
+pct_color() {
+  local pct=$1
+  if [ "$pct" -ge 80 ]; then echo "$RED"
+  elif [ "$pct" -ge 50 ]; then echo "$YELLOW"
+  else echo "$GREEN"
+  fi
+}
+
 # --- Working directory ---
 cwd=$(echo "$input" | "$JQ" -r '.workspace.current_dir // .cwd // empty')
 [ -z "$cwd" ] && cwd=$(pwd)
@@ -55,25 +64,36 @@ model_short=$(echo "$model" | sed 's/Claude //i' | sed 's/ (.*)//')
 # --- Context window usage ---
 used_pct=$(echo "$input" | "$JQ" -r '.context_window.used_percentage // 0')
 used_pct_int=$(printf "%.0f" "$used_pct")
+ctx_color=$(pct_color "$used_pct_int")
+ctx_bar=$(make_bar "$used_pct_int")
 
-if [ "$used_pct_int" -ge 80 ]; then
-  ctx_color="$RED"
-elif [ "$used_pct_int" -ge 50 ]; then
-  ctx_color="$YELLOW"
-else
-  ctx_color="$GREEN"
-fi
-
-bar=$(make_bar "$used_pct_int")
-
-# --- Counters from state.json ---
+# --- State.json ---
 STATE="$HOME/.ai-statusbar/state.json"
 requests=0
 lines=0
+today_tokens=0
+week_tokens=0
+daily_limit=1000000
+weekly_limit=5000000
+
 if [ -f "$STATE" ]; then
   requests=$("$JQ" -r '.requests_count // 0' "$STATE" 2>/dev/null || echo 0)
   lines=$("$JQ" -r '.lines_count // 0' "$STATE" 2>/dev/null || echo 0)
+  today_tokens=$("$JQ" -r '.usage.today_tokens // 0' "$STATE" 2>/dev/null || echo 0)
+  week_tokens=$("$JQ" -r '.usage.week_tokens // 0' "$STATE" 2>/dev/null || echo 0)
+  daily_limit=$("$JQ" -r '.usage.daily_limit // 1000000' "$STATE" 2>/dev/null || echo 1000000)
+  weekly_limit=$("$JQ" -r '.usage.weekly_limit // 5000000' "$STATE" 2>/dev/null || echo 5000000)
 fi
+
+# --- Usage/d progress bar ---
+day_pct=$(awk "BEGIN { v = int($today_tokens * 100 / $daily_limit); print (v > 100 ? 100 : v) }")
+day_color=$(pct_color "$day_pct")
+day_bar=$(make_bar "$day_pct")
+
+# --- Usage/w progress bar ---
+week_pct=$(awk "BEGIN { v = int($week_tokens * 100 / $weekly_limit); print (v > 100 ? 100 : v) }")
+week_color=$(pct_color "$week_pct")
+week_bar=$(make_bar "$week_pct")
 
 # --- Build output ---
 SEP="${DIM} │ ${RESET}"
@@ -84,7 +104,6 @@ out+="${BOLD}${CYAN}${folder}${RESET}"
 if [ -n "$git_branch" ]; then
   out+=" ${git_color}[${git_branch}${git_status_indicator}]${RESET}"
 fi
-
 out+="${SEP}"
 
 # Model
@@ -92,8 +111,14 @@ if [ -n "$model_short" ]; then
   out+="${MAGENTA}${model_short}${RESET}${SEP}"
 fi
 
-# Progress bar + usage %
-out+="${ctx_color}${bar} ${used_pct_int}%${RESET}${SEP}"
+# ctx progress bar
+out+="${DIM}ctx${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}%${RESET}${SEP}"
+
+# usage/d progress bar
+out+="${DIM}usage/d${RESET} ${day_color}${day_bar} ${day_pct}%${RESET}${SEP}"
+
+# usage/w progress bar
+out+="${DIM}usage/w${RESET} ${week_color}${week_bar} ${week_pct}%${RESET}${SEP}"
 
 # Requests counter
 out+="${BLUE}🔧 ${requests} req${RESET}${SEP}"
