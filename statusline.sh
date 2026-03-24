@@ -30,7 +30,7 @@ make_bar() {
   printf "%s" "$bar"
 }
 
-# Color by percentage thresholds (for ctx only)
+# Color by percentage thresholds
 pct_color() {
   local pct=$1
   if [ "$pct" -ge 80 ]; then echo "$RED"
@@ -67,7 +67,7 @@ if git -C "$cwd" rev-parse --git-dir > /dev/null 2>&1; then
   fi
 fi
 
-# --- Model name (shorten) ---
+# --- Model ---
 model=$(echo "$input" | "$JQ" -r '.model.display_name // empty')
 model_short=$(echo "$model" | sed 's/Claude //i' | sed 's/ (.*)//')
 
@@ -76,51 +76,45 @@ used_pct=$(echo "$input" | "$JQ" -r '.context_window.used_percentage // 0')
 used_pct_int=$(printf "%.0f" "$used_pct")
 ctx_color=$(pct_color "$used_pct_int")
 ctx_bar=$(make_bar "$used_pct_int")
-ctx_size=$(echo "$input" | "$JQ" -r '.context_window.max_tokens // 200000')
+ctx_size=$(echo "$input" | "$JQ" -r '.context_window.context_window_size // 200000')
 ctx_size_fmt=$(fmt_num "$ctx_size")
 
-# Token counts — read directly from statusLine JSON (most accurate)
+# --- Token counts (live from statusLine JSON) ---
 tok_in=$(echo "$input" | "$JQ" -r '.context_window.total_input_tokens // 0')
 tok_out=$(echo "$input" | "$JQ" -r '.context_window.total_output_tokens // 0')
 tok_total=$(( tok_in + tok_out ))
 tok_fmt=$(fmt_num "$tok_total")
 
-# --- State.json ---
-STATE="$HOME/.ai-statusbar/state.json"
+# --- Rate limits (matches /usage dialog exactly) ---
+usage_5h=$(echo "$input" | "$JQ" -r '.rate_limits.five_hour.used_percentage // 0')
+usage_5h_int=$(printf "%.0f" "$usage_5h")
+usage_5h_bar=$(make_bar "$usage_5h_int")
 
-# Save live token counts to state.json so stop.sh can use them for daily/weekly accumulation
+usage_7d=$(echo "$input" | "$JQ" -r '.rate_limits.seven_day.used_percentage // 0')
+usage_7d_int=$(printf "%.0f" "$usage_7d")
+usage_7d_bar=$(make_bar "$usage_7d_int")
+
+# --- Cost ---
+cost=$(echo "$input" | "$JQ" -r '.cost.total_cost_usd // 0')
+cost_fmt=$(awk "BEGIN { printf \"%.2f\", $cost }")
+
+# --- Lines (from Claude Code's own counter) ---
+lines_added=$(echo "$input" | "$JQ" -r '.cost.total_lines_added // 0')
+lines_removed=$(echo "$input" | "$JQ" -r '.cost.total_lines_removed // 0')
+
+# --- Request counter from state.json (PPID-based session) ---
+STATE="$HOME/.ai-statusbar/state.json"
+requests=0
+if [ -f "$STATE" ]; then
+  requests=$("$JQ" -r '.requests_count // 0' "$STATE" 2>/dev/null || echo 0)
+fi
+
+# Save live token counts to state.json for stop.sh daily/weekly accumulation
 if [ "$tok_total" -gt 0 ] && [ -f "$STATE" ]; then
   "$JQ" --argjson ti "$tok_in" --argjson to "$tok_out" \
     '.tokens.input = $ti | .tokens.output = $to' \
     "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
 fi
-requests=0
-lines=0
-today_tokens=0
-week_tokens=0
-daily_limit=1000000
-weekly_limit=5000000
-
-if [ -f "$STATE" ]; then
-  requests=$("$JQ" -r '.requests_count // 0' "$STATE" 2>/dev/null || echo 0)
-  lines=$("$JQ" -r '.lines_count // 0' "$STATE" 2>/dev/null || echo 0)
-  today_tokens=$("$JQ" -r '.usage.today_tokens // 0' "$STATE" 2>/dev/null || echo 0)
-  week_tokens=$("$JQ" -r '.usage.week_tokens // 0' "$STATE" 2>/dev/null || echo 0)
-  daily_limit=$("$JQ" -r '.usage.daily_limit // 1000000' "$STATE" 2>/dev/null || echo 1000000)
-  weekly_limit=$("$JQ" -r '.usage.weekly_limit // 5000000' "$STATE" 2>/dev/null || echo 5000000)
-fi
-
-# --- Usage/d ---
-day_pct=$(awk "BEGIN { v = int($today_tokens * 100 / $daily_limit); print (v > 100 ? 100 : v) }")
-day_bar=$(make_bar "$day_pct")
-day_limit_fmt=$(fmt_num "$daily_limit")
-day_used_fmt=$(fmt_num "$today_tokens")
-
-# --- Usage/w ---
-week_pct=$(awk "BEGIN { v = int($week_tokens * 100 / $weekly_limit); print (v > 100 ? 100 : v) }")
-week_bar=$(make_bar "$week_pct")
-week_limit_fmt=$(fmt_num "$weekly_limit")
-week_used_fmt=$(fmt_num "$week_tokens")
 
 # --- Build output ---
 SEP="${DIM} │ ${RESET}"
@@ -141,19 +135,22 @@ fi
 # ctx — threshold colors
 out+="${DIM}ctx${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}% / ${ctx_size_fmt}${RESET}${SEP}"
 
-# usage/d — blue
-out+="${DIM}usage/d${RESET} ${BLUE}${day_bar} ${day_pct}% / ${day_limit_fmt}${RESET}${SEP}"
+# usage/d — 5h rate limit (matches /usage "Current session")
+out+="${DIM}usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET}${SEP}"
 
-# usage/w — blue
-out+="${DIM}usage/w${RESET} ${BLUE}${week_bar} ${week_pct}% / ${week_limit_fmt}${RESET}${SEP}"
+# usage/w — 7d rate limit (matches /usage "Current week")
+out+="${DIM}usage/w${RESET} ${BLUE}${usage_7d_bar} ${usage_7d_int}%${RESET}${SEP}"
 
-# Token counter (from statusLine JSON — live, accurate)
+# Token counter
 out+="${DIM}tok${RESET} ${CYAN}${tok_fmt}${RESET}${SEP}"
+
+# Cost
+out+="${DIM}\$${cost_fmt}${RESET}${SEP}"
 
 # Requests counter
 out+="${BLUE}🔧 ${requests} req${RESET}${SEP}"
 
-# Lines of code counter
-out+="${DIM}📝 ${lines} lines${RESET}"
+# Lines added/removed
+out+="${DIM}📝 +${lines_added}/-${lines_removed}${RESET}"
 
 printf "%b" "$out"
