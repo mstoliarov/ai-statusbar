@@ -30,13 +30,23 @@ make_bar() {
   printf "%s" "$bar"
 }
 
-# Color by percentage thresholds
+# Color by percentage thresholds (for ctx only)
 pct_color() {
   local pct=$1
   if [ "$pct" -ge 80 ]; then echo "$RED"
   elif [ "$pct" -ge 50 ]; then echo "$YELLOW"
   else echo "$GREEN"
   fi
+}
+
+# Format large numbers: 1234567 → 1.2M, 45000 → 45k
+fmt_num() {
+  local n=$1
+  awk "BEGIN {
+    if ($n >= 1000000) printf \"%.1fM\", $n/1000000
+    else if ($n >= 1000) printf \"%.0fk\", $n/1000
+    else printf \"%d\", $n
+  }"
 }
 
 # --- Working directory ---
@@ -61,16 +71,20 @@ fi
 model=$(echo "$input" | "$JQ" -r '.model.display_name // empty')
 model_short=$(echo "$model" | sed 's/Claude //i' | sed 's/ (.*)//')
 
-# --- Context window usage ---
+# --- Context window ---
 used_pct=$(echo "$input" | "$JQ" -r '.context_window.used_percentage // 0')
 used_pct_int=$(printf "%.0f" "$used_pct")
 ctx_color=$(pct_color "$used_pct_int")
 ctx_bar=$(make_bar "$used_pct_int")
+ctx_size=$(echo "$input" | "$JQ" -r '.context_window.max_tokens // 200000')
+ctx_size_fmt=$(fmt_num "$ctx_size")
 
 # --- State.json ---
 STATE="$HOME/.ai-statusbar/state.json"
 requests=0
 lines=0
+session_tokens_in=0
+session_tokens_out=0
 today_tokens=0
 week_tokens=0
 daily_limit=1000000
@@ -79,25 +93,33 @@ weekly_limit=5000000
 if [ -f "$STATE" ]; then
   requests=$("$JQ" -r '.requests_count // 0' "$STATE" 2>/dev/null || echo 0)
   lines=$("$JQ" -r '.lines_count // 0' "$STATE" 2>/dev/null || echo 0)
+  session_tokens_in=$("$JQ" -r '.tokens.input // 0' "$STATE" 2>/dev/null || echo 0)
+  session_tokens_out=$("$JQ" -r '.tokens.output // 0' "$STATE" 2>/dev/null || echo 0)
   today_tokens=$("$JQ" -r '.usage.today_tokens // 0' "$STATE" 2>/dev/null || echo 0)
   week_tokens=$("$JQ" -r '.usage.week_tokens // 0' "$STATE" 2>/dev/null || echo 0)
   daily_limit=$("$JQ" -r '.usage.daily_limit // 1000000' "$STATE" 2>/dev/null || echo 1000000)
   weekly_limit=$("$JQ" -r '.usage.weekly_limit // 5000000' "$STATE" 2>/dev/null || echo 5000000)
 fi
 
-# --- Usage/d progress bar ---
+# Total session tokens
+session_total=$(( session_tokens_in + session_tokens_out ))
+session_tok_fmt=$(fmt_num "$session_total")
+
+# --- Usage/d ---
 day_pct=$(awk "BEGIN { v = int($today_tokens * 100 / $daily_limit); print (v > 100 ? 100 : v) }")
-day_color=$(pct_color "$day_pct")
 day_bar=$(make_bar "$day_pct")
+day_limit_fmt=$(fmt_num "$daily_limit")
+day_used_fmt=$(fmt_num "$today_tokens")
 
-# --- Usage/w progress bar ---
+# --- Usage/w ---
 week_pct=$(awk "BEGIN { v = int($week_tokens * 100 / $weekly_limit); print (v > 100 ? 100 : v) }")
-week_color=$(pct_color "$week_pct")
 week_bar=$(make_bar "$week_pct")
+week_limit_fmt=$(fmt_num "$weekly_limit")
+week_used_fmt=$(fmt_num "$week_tokens")
 
-# --- Build output ---
+# --- Build output (newline prefix to appear below plan mode / accept edits) ---
 SEP="${DIM} │ ${RESET}"
-out=""
+out="\n"
 
 # Folder + git
 out+="${BOLD}${CYAN}${folder}${RESET}"
@@ -111,14 +133,17 @@ if [ -n "$model_short" ]; then
   out+="${MAGENTA}${model_short}${RESET}${SEP}"
 fi
 
-# ctx progress bar
-out+="${DIM}ctx${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}%${RESET}${SEP}"
+# ctx — threshold colors
+out+="${DIM}ctx${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}% / ${ctx_size_fmt}${RESET}${SEP}"
 
-# usage/d progress bar
-out+="${DIM}usage/d${RESET} ${day_color}${day_bar} ${day_pct}%${RESET}${SEP}"
+# usage/d — blue
+out+="${DIM}usage/d${RESET} ${BLUE}${day_bar} ${day_pct}% / ${day_limit_fmt}${RESET}${SEP}"
 
-# usage/w progress bar
-out+="${DIM}usage/w${RESET} ${week_color}${week_bar} ${week_pct}%${RESET}${SEP}"
+# usage/w — blue
+out+="${DIM}usage/w${RESET} ${BLUE}${week_bar} ${week_pct}% / ${week_limit_fmt}${RESET}${SEP}"
+
+# Token counter
+out+="${DIM}tok${RESET} ${CYAN}${session_tok_fmt}${RESET}${SEP}"
 
 # Requests counter
 out+="${BLUE}🔧 ${requests} req${RESET}${SEP}"
