@@ -47,6 +47,31 @@ Edit `~/.ai-statusbar/state.json` to adjust usage limits:
 }
 ```
 
+## Customizing Elements
+
+Run the interactive configurator to toggle which elements appear:
+
+```bash
+bash ~/.ai-statusbar/configure.sh
+```
+
+Or type `/statusbar` in Claude Code.
+
+Use space to toggle, enter to confirm:
+
+```
+  ◉ Model name
+  ◉ Context window usage
+  ○ Daily rate limit
+  ○ Weekly rate limit
+  ◉ Token counter (session)
+  ◉ Cost per session
+  ◉ Total requests (session)
+  ◉ Code lines written (session)
+```
+
+Settings are saved to `~/.ai-statusbar/config.json` and take effect immediately.
+
 ## How it works
 
 ```
@@ -75,12 +100,14 @@ Gemini CLI
 |------|---------|
 | `install.sh` | One-command setup (downloads jq + gum, patches settings.json) |
 | `statusline.sh` | Claude Code inline status bar |
+| `configure.sh` | Interactive element selector (gum multiselect) |
 | `render.sh` | Terminal overlay after each response (uses gum) |
 | `hooks/post-tool.sh` | PostToolUse hook — request counter, lines counter |
 | `hooks/stop.sh` | Stop hook — usage tracking, cost estimate |
 | `gemini-wrapper.sh` | Gemini CLI wrapper function |
 | `update-state.sh` | Utility to patch state.json via jq |
 | `state.json` | Session state (excluded from git) |
+| `config.json` | Element visibility config (excluded from git) |
 
 ## License
 

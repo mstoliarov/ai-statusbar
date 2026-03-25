@@ -96,10 +96,22 @@ else
   echo "    statusLine configured"
 fi
 
+# 8. Initialize default config if not present
+CONFIG="$STATUSBAR_DIR/config.json"
+if [[ ! -f "$CONFIG" ]]; then
+  echo '{"show":{"model":true,"context":true,"daily_limit":true,"weekly_limit":true,"tokens":true,"cost":true,"requests":true,"lines":true}}' \
+    | "$JQ" '.' > "$CONFIG"
+  echo "    Default config.json created (all elements enabled)"
+else
+  echo "    config.json already present"
+fi
+
 echo ""
 echo "==> Done! ai-statusbar installed."
 echo ""
-echo "    Test:   bash ~/.ai-statusbar/render.sh"
-echo "    Reload: source ~/.bashrc"
+echo "    Test:      bash ~/.ai-statusbar/render.sh"
+echo "    Reload:    source ~/.bashrc"
+echo "    Configure: bash ~/.ai-statusbar/configure.sh"
+echo "               (or type /statusbar in Claude Code)"
 echo ""
 echo "    The status bar will appear automatically after each Claude/Gemini response."

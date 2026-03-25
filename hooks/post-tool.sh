@@ -11,6 +11,11 @@ TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // ""')
 
 [[ -z "$TOOL_NAME" ]] && exit 0
 
+# Initialize state.json if missing or invalid JSON
+if [[ ! -f "$STATE" ]] || ! "$JQ" -e . "$STATE" &>/dev/null 2>&1; then
+  echo '{"tool":{},"tokens":{"input":0,"output":0,"context_used_pct":0},"cost_usd":0,"quota_used_pct":0,"session":{"start_iso":"","project_dir":""},"usage":{},"requests_count":0,"lines_count":0,"claude_pid":0}' > "$STATE"
+fi
+
 # Update tool name/status
 "$JQ" \
   --arg name "$TOOL_NAME" \

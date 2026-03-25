@@ -109,6 +109,21 @@ if [ -f "$STATE" ]; then
   requests=$("$JQ" -r '.requests_count // 0' "$STATE" 2>/dev/null || echo 0)
 fi
 
+# --- Element visibility config ---
+CONFIG="$HOME/.ai-statusbar/config.json"
+CONFIG_SHOW=""
+if [ -f "$CONFIG" ]; then
+  CONFIG_SHOW=$("$JQ" -r '.show | to_entries[] | "\(.key)=\(.value)"' "$CONFIG" 2>/dev/null)
+fi
+
+# Returns 1 if element should be shown (default: show all when no config)
+show_el() {
+  [ -z "$CONFIG_SHOW" ] && echo 1 && return
+  local val
+  val=$(echo "$CONFIG_SHOW" | grep "^${1}=" | cut -d= -f2)
+  [ "$val" = "false" ] && echo 0 || echo 1
+}
+
 # Save live token counts to state.json for stop.sh daily/weekly accumulation
 if [ "$tok_total" -gt 0 ] && [ -f "$STATE" ]; then
   "$JQ" --argjson ti "$tok_in" --argjson to "$tok_out" \
@@ -118,39 +133,65 @@ fi
 
 # --- Build output ---
 SEP="${DIM} │ ${RESET}"
-out="\n\n"
+segments=()
 
-# Folder + git
-out+="${BOLD}${CYAN}${folder}${RESET}"
+# Folder + git (always shown)
+seg="${BOLD}${CYAN}${folder}${RESET}"
 if [ -n "$git_branch" ]; then
-  out+=" ${git_color}[${git_branch}${git_status_indicator}]${RESET}"
+  seg+=" ${git_color}[${git_branch}${git_status_indicator}]${RESET}"
 fi
-out+="${SEP}"
+segments+=("$seg")
 
 # Model
-if [ -n "$model_short" ]; then
-  out+="${MAGENTA}${model_short}${RESET}${SEP}"
+if [ -n "$model_short" ] && [ "$(show_el model)" = "1" ]; then
+  segments+=("${MAGENTA}${model_short}${RESET}")
 fi
 
 # ctx — threshold colors
-out+="${DIM}ctx${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}% / ${ctx_size_fmt}${RESET}${SEP}"
+if [ "$(show_el context)" = "1" ]; then
+  segments+=("${DIM}ctx${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}% / ${ctx_size_fmt}${RESET}")
+fi
 
 # usage/d — 5h rate limit (matches /usage "Current session")
-out+="${DIM}usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET}${SEP}"
+if [ "$(show_el daily_limit)" = "1" ]; then
+  segments+=("${DIM}usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET}")
+fi
 
 # usage/w — 7d rate limit (matches /usage "Current week")
-out+="${DIM}usage/w${RESET} ${BLUE}${usage_7d_bar} ${usage_7d_int}%${RESET}${SEP}"
+if [ "$(show_el weekly_limit)" = "1" ]; then
+  segments+=("${DIM}usage/w${RESET} ${BLUE}${usage_7d_bar} ${usage_7d_int}%${RESET}")
+fi
 
 # Token counter
-out+="${DIM}tok${RESET} ${CYAN}${tok_fmt}${RESET}${SEP}"
+if [ "$(show_el tokens)" = "1" ]; then
+  segments+=("${DIM}tok${RESET} ${CYAN}${tok_fmt}${RESET}")
+fi
 
 # Cost
-out+="${DIM}\$${cost_fmt}${RESET}${SEP}"
+if [ "$(show_el cost)" = "1" ]; then
+  segments+=("${DIM}\$${cost_fmt}${RESET}")
+fi
 
 # Requests counter
-out+="${BLUE}🔧 ${requests} req${RESET}${SEP}"
+if [ "$(show_el requests)" = "1" ]; then
+  segments+=("${BLUE}🔧 ${requests} req${RESET}")
+fi
 
 # Lines added/removed
-out+="${DIM}📝 +${lines_added}/-${lines_removed}${RESET}"
+if [ "$(show_el lines)" = "1" ]; then
+  segments+=("${DIM}📝 +${lines_added}/-${lines_removed}${RESET}")
+fi
+
+# Join segments with separator (no trailing │)
+out="\n\n"
+first=1
+for seg in "${segments[@]}"; do
+  if [ "$first" = "1" ]; then
+    out+="$seg"
+    first=0
+  else
+    out+="${SEP}${seg}"
+  fi
+done
 
 printf "%b" "$out"
