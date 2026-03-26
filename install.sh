@@ -54,17 +54,7 @@ if ! grep -q 'ai-statusbar.*PATH\|PATH.*bin.*ai-status\|HOME.*bin.*PATH' "$BASHR
   fi
 fi
 
-# 5. Add Gemini wrapper to .bashrc
-if ! grep -q 'ai-statusbar/gemini-wrapper' "$BASHRC" 2>/dev/null; then
-  echo '' >> "$BASHRC"
-  echo '# Gemini CLI status bar wrapper' >> "$BASHRC"
-  echo 'source "$HOME/.ai-statusbar/gemini-wrapper.sh"' >> "$BASHRC"
-  echo "    Added Gemini wrapper to .bashrc"
-else
-  echo "    Gemini wrapper already in .bashrc"
-fi
-
-# 6. Patch Claude Code settings.json with hooks
+# 5. Patch Claude Code settings.json with hooks
 mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
 
 if [[ ! -f "$CLAUDE_SETTINGS" ]]; then

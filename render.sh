@@ -69,12 +69,7 @@ if [[ -n "$TOOL" && "$TOOL" != "null" && "$TOOL" != "" ]]; then
   fi
 fi
 
-# Provider icon
-if [[ "$PROVIDER" == "gemini" ]]; then
-  ICON="◆"
-else
-  ICON="◈"
-fi
+ICON="◈"
 
 # Build segments
 PARTS=()

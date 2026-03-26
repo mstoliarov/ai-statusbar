@@ -1,6 +1,6 @@
 # ai-statusbar
 
-Live status bar plugin for [Claude Code](https://claude.ai/claude-code) and Gemini CLI.
+Live status bar plugin for [Claude Code](https://claude.ai/claude-code).
 
 ```
 .PROJECTS [master*] │ Sonnet 4.6 │ SUB │ ctx ████░░░░░░ 42% / 200k │ usage/d ██░░░░░░░░ 18% / 1M │ usage/w █░░░░░░░░░ 9% / 5M │ tok 12.3k │ 🔧 8 req │ 📝 120 lines
@@ -11,7 +11,7 @@ Live status bar plugin for [Claude Code](https://claude.ai/claude-code) and Gemi
 | Element | Description |
 |---------|-------------|
 | `folder [branch*]` | Working directory + git branch, `*` = dirty |
-| `API` / `SUB` / `VRT` | Auth type — API key, Subscription, or Vertex AI (Gemini only) |
+| `API` / `SUB` | Auth type — API key or Subscription |
 | `ctx ████ 42% / 200k` | Context window usage — green → yellow → red |
 | `usage/d ██ 18% / 1M` | Daily token usage vs limit (blue) |
 | `usage/w █ 9% / 5M` | Weekly token usage vs limit (blue) |
@@ -19,7 +19,6 @@ Live status bar plugin for [Claude Code](https://claude.ai/claude-code) and Gemi
 | `🔧 8 req` | Tool calls since Claude CLI started |
 | `📝 120 lines` | Lines written via Write/Edit tools |
 | Terminal overlay | Cost estimate + tokens after each response (via `gum`) |
-| Gemini CLI | Same status bar for `gemini` command |
 
 ## Install
 
@@ -91,9 +90,6 @@ Claude Code
         └─ reads Claude Code JSON + state.json
            outputs colored inline status bar
 
-Gemini CLI
-  └─ gemini-wrapper.sh (source in ~/.bashrc)
-        └─ wraps gemini command, calls render.sh after response
 ```
 
 ## Files
@@ -106,7 +102,6 @@ Gemini CLI
 | `render.sh` | Terminal overlay after each response (uses gum) |
 | `hooks/post-tool.sh` | PostToolUse hook — request counter, lines counter |
 | `hooks/stop.sh` | Stop hook — usage tracking, cost estimate |
-| `gemini-wrapper.sh` | Gemini CLI wrapper function |
 | `update-state.sh` | Utility to patch state.json via jq |
 | `state.json` | Session state (excluded from git) |
 | `config.json` | Element visibility config (excluded from git) |
