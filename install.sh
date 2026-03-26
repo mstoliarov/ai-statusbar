@@ -99,7 +99,7 @@ fi
 # 8. Initialize default config if not present
 CONFIG="$STATUSBAR_DIR/config.json"
 if [[ ! -f "$CONFIG" ]]; then
-  echo '{"show":{"model":true,"context":true,"daily_limit":true,"weekly_limit":true,"tokens":true,"cost":true,"requests":true,"lines":true}}' \
+  echo '{"show":{"model":true,"auth":true,"context":true,"daily_limit":true,"weekly_limit":true,"tokens":true,"cost":true,"requests":true,"lines":true}}' \
     | "$JQ" '.' > "$CONFIG"
   echo "    Default config.json created (all elements enabled)"
 else

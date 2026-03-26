@@ -71,6 +71,14 @@ fi
 model=$(echo "$input" | "$JQ" -r '.model.display_name // empty')
 model_short=$(echo "$model" | sed 's/Claude //i' | sed 's/ (.*)//')
 
+# --- Auth type ---
+provider=$("$JQ" -r '.provider // "claude"' "$STATE" 2>/dev/null)
+if [ "$provider" = "gemini" ]; then
+  auth_type=$("$JQ" -r '.auth_type // "API"' "$STATE" 2>/dev/null)
+else
+  [ -n "$ANTHROPIC_API_KEY" ] && auth_type="API" || auth_type="SUB"
+fi
+
 # --- Context window ---
 used_pct=$(echo "$input" | "$JQ" -r '.context_window.used_percentage // 0')
 used_pct_int=$(printf "%.0f" "$used_pct")
@@ -145,6 +153,11 @@ segments+=("$seg")
 # Model
 if [ -n "$model_short" ] && [ "$(show_el model)" = "1" ]; then
   segments+=("${MAGENTA}${model_short}${RESET}")
+fi
+
+# Auth type
+if [ "$(show_el auth)" = "1" ]; then
+  segments+=("${DIM}${auth_type}${RESET}")
 fi
 
 # ctx — threshold colors

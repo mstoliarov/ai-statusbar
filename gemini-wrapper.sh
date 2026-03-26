@@ -34,6 +34,17 @@ gemini() {
     "$JQ" '.model = "gemini"' "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
   fi
 
+  # Detect auth type (VRT = Vertex AI, API = standard key)
+  local auth_type="API"
+  if [[ -n "$GOOGLE_APPLICATION_CREDENTIALS" ]]; then
+    auth_type="VRT"
+  else
+    for arg in "$@"; do
+      [[ "$arg" == "--vertex" || "$arg" == "-v" ]] && auth_type="VRT" && break
+    done
+  fi
+  "$JQ" --arg t "$auth_type" '.auth_type = $t' "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
+
   # Run real gemini
   command gemini "$@"
 

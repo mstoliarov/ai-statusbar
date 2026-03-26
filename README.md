@@ -3,7 +3,7 @@
 Live status bar plugin for [Claude Code](https://claude.ai/claude-code) and Gemini CLI.
 
 ```
-.PROJECTS [master*] │ Sonnet 4.6 │ ctx ████░░░░░░ 42% / 200k │ usage/d ██░░░░░░░░ 18% / 1M │ usage/w █░░░░░░░░░ 9% / 5M │ tok 12.3k │ 🔧 8 req │ 📝 120 lines
+.PROJECTS [master*] │ Sonnet 4.6 │ SUB │ ctx ████░░░░░░ 42% / 200k │ usage/d ██░░░░░░░░ 18% / 1M │ usage/w █░░░░░░░░░ 9% / 5M │ tok 12.3k │ 🔧 8 req │ 📝 120 lines
 ```
 
 ## Features
@@ -11,6 +11,7 @@ Live status bar plugin for [Claude Code](https://claude.ai/claude-code) and Gemi
 | Element | Description |
 |---------|-------------|
 | `folder [branch*]` | Working directory + git branch, `*` = dirty |
+| `API` / `SUB` / `VRT` | Auth type — API key, Subscription, or Vertex AI (Gemini only) |
 | `ctx ████ 42% / 200k` | Context window usage — green → yellow → red |
 | `usage/d ██ 18% / 1M` | Daily token usage vs limit (blue) |
 | `usage/w █ 9% / 5M` | Weekly token usage vs limit (blue) |
@@ -61,6 +62,7 @@ Use space to toggle, enter to confirm:
 
 ```
   ◉ Model name
+  ◉ Authentication type
   ◉ Context window usage
   ○ Daily rate limit
   ○ Weekly rate limit
