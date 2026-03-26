@@ -46,38 +46,7 @@ fi
 JQ="$BIN_DIR/jq"
 [[ -f "$BIN_DIR/jq.exe" && ! -f "$BIN_DIR/jq" ]] && JQ="$BIN_DIR/jq.exe"
 
-# 3. Install gum if missing
-if ! "$BIN_DIR/gum" --version &>/dev/null 2>&1 && ! "$BIN_DIR/gum.exe" --version &>/dev/null 2>&1; then
-  echo "==> Downloading gum..."
-  if [[ "$PLATFORM" == "windows" ]]; then
-    curl -sL --ssl-no-revoke \
-      "https://github.com/charmbracelet/gum/releases/download/v0.14.5/gum_0.14.5_Windows_x86_64.zip" \
-      -o /tmp/gum.zip
-    mkdir -p /tmp/gum_extract
-    unzip -o /tmp/gum.zip -d /tmp/gum_extract
-    cp /tmp/gum_extract/gum_0.14.5_Windows_x86_64/gum.exe "$BIN_DIR/gum.exe"
-    rm -rf /tmp/gum.zip /tmp/gum_extract
-  else
-    ARCH=$(uname -m)
-    if [[ "$ARCH" == "aarch64" || "$ARCH" == "arm64" ]]; then
-      GUM_FILE="gum_0.14.5_Linux_arm64.tar.gz"
-    else
-      GUM_FILE="gum_0.14.5_Linux_x86_64.tar.gz"
-    fi
-    curl -sL \
-      "https://github.com/charmbracelet/gum/releases/download/v0.14.5/${GUM_FILE}" \
-      -o /tmp/gum.tar.gz
-    tar -xzf /tmp/gum.tar.gz -C /tmp/ --wildcards "*/gum" --strip-components=1
-    mv /tmp/gum "$BIN_DIR/gum"
-    chmod +x "$BIN_DIR/gum"
-    rm -f /tmp/gum.tar.gz
-  fi
-  echo "    gum installed"
-else
-  echo "    gum already present"
-fi
-
-# 4. Add ~/bin to PATH in .bashrc if not already there
+# 3. Add ~/bin to PATH in .bashrc if not already there
 if ! grep -q '$HOME/bin' "$BASHRC" 2>/dev/null; then
   echo '' >> "$BASHRC"
   echo '# ai-statusbar tools' >> "$BASHRC"
@@ -129,9 +98,7 @@ fi
 echo ""
 echo "==> Done! ai-statusbar installed."
 echo ""
-echo "    Test:      bash ~/.ai-statusbar/render.sh"
 echo "    Reload:    source ~/.bashrc"
-echo "    Configure: bash ~/.ai-statusbar/configure.sh"
-echo "               (or type /statusbar in Claude Code)"
+echo "    Config:    type /statusbar in Claude Code"
 echo ""
-echo "    The status bar will appear automatically after each Claude response."
+echo "    The status bar will appear automatically in Claude Code."

@@ -49,8 +49,21 @@ fmt_num() {
   }"
 }
 
-# --- Working directory ---
-cwd=$(echo "$input" | "$JQ" -r '.workspace.current_dir // .cwd // empty')
+# --- Parse all fields from statusLine JSON in one jq call ---
+eval "$("$JQ" -r '
+  @sh "cwd=\(.workspace.current_dir // .cwd // "")",
+  @sh "model=\(.model.display_name // "")",
+  @sh "used_pct=\(.context_window.used_percentage // 0)",
+  @sh "ctx_size=\(.context_window.context_window_size // 200000)",
+  @sh "tok_in=\(.context_window.total_input_tokens // 0)",
+  @sh "tok_out=\(.context_window.total_output_tokens // 0)",
+  @sh "usage_5h=\(.rate_limits.five_hour.used_percentage // 0)",
+  @sh "usage_7d=\(.rate_limits.seven_day.used_percentage // 0)",
+  @sh "cost=\(.cost.total_cost_usd // 0)",
+  @sh "lines_added=\(.cost.total_lines_added // 0)",
+  @sh "lines_removed=\(.cost.total_lines_removed // 0)"
+' <<< "$input")"
+
 [ -z "$cwd" ] && cwd=$(pwd)
 folder=$(basename "$cwd")
 
@@ -68,7 +81,6 @@ if git -C "$cwd" rev-parse --git-dir > /dev/null 2>&1; then
 fi
 
 # --- Model ---
-model=$(echo "$input" | "$JQ" -r '.model.display_name // empty')
 model_short=$(echo "$model" | sed 's/Claude //i' | sed 's/ (.*)//')
 
 
@@ -132,36 +144,22 @@ ram_color=$(pct_color "$ram_pct")
 claude_ram_bar=$(make_bar "$claude_ram_pct")
 claude_ram_color=$(pct_color "$claude_ram_pct")
 
-# --- Context window ---
-used_pct=$(echo "$input" | "$JQ" -r '.context_window.used_percentage // 0')
+# --- Derived values from parsed JSON ---
 used_pct_int=$(printf "%.0f" "$used_pct")
 ctx_color=$(pct_color "$used_pct_int")
 ctx_bar=$(make_bar "$used_pct_int")
-ctx_size=$(echo "$input" | "$JQ" -r '.context_window.context_window_size // 200000')
 ctx_size_fmt=$(fmt_num "$ctx_size")
 
-# --- Token counts (live from statusLine JSON) ---
-tok_in=$(echo "$input" | "$JQ" -r '.context_window.total_input_tokens // 0')
-tok_out=$(echo "$input" | "$JQ" -r '.context_window.total_output_tokens // 0')
 tok_total=$(( tok_in + tok_out ))
 tok_fmt=$(fmt_num "$tok_total")
 
-# --- Rate limits (matches /usage dialog exactly) ---
-usage_5h=$(echo "$input" | "$JQ" -r '.rate_limits.five_hour.used_percentage // 0')
 usage_5h_int=$(printf "%.0f" "$usage_5h")
 usage_5h_bar=$(make_bar "$usage_5h_int")
 
-usage_7d=$(echo "$input" | "$JQ" -r '.rate_limits.seven_day.used_percentage // 0')
 usage_7d_int=$(printf "%.0f" "$usage_7d")
 usage_7d_bar=$(make_bar "$usage_7d_int")
 
-# --- Cost ---
-cost=$(echo "$input" | "$JQ" -r '.cost.total_cost_usd // 0')
 cost_fmt=$(awk "BEGIN { printf \"%.2f\", $cost }")
-
-# --- Lines (from Claude Code's own counter) ---
-lines_added=$(echo "$input" | "$JQ" -r '.cost.total_lines_added // 0')
-lines_removed=$(echo "$input" | "$JQ" -r '.cost.total_lines_removed // 0')
 
 # --- Request counter from state.json (PPID-based session) ---
 STATE="$HOME/.ai-statusbar/state.json"

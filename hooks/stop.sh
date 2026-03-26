@@ -81,5 +81,3 @@ fi
    .usage.week_start = $week_start |
    .usage.week_tokens = $week_tok' \
   "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
-
-bash "$HOME/.ai-statusbar/render.sh"
