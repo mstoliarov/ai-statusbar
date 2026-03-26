@@ -157,7 +157,7 @@ fi
 
 # Auth type
 if [ "$(show_el auth)" = "1" ]; then
-  segments+=("${DIM}${auth_type}${RESET}")
+  segments+=("${MAGENTA}${auth_type}${RESET}")
 fi
 
 # ctx — threshold colors
