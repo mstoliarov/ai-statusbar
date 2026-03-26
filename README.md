@@ -1,24 +1,28 @@
 # ai-statusbar
 
-Live status bar plugin for [Claude Code](https://claude.ai/claude-code).
+Real-time status bar for [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code).
 
 ```
-.PROJECTS [master*] │ Sonnet 4.6 │ SUB │ ctx ████░░░░░░ 42% / 200k │ usage/d ██░░░░░░░░ 18% / 1M │ usage/w █░░░░░░░░░ 9% / 5M │ tok 12.3k │ 🔧 8 req │ 📝 120 lines
+.ai-statusbar [master*] │ Opus 4.6 │ ctx ██░░░░░░░░ 25% / 200k │ usage/d ████░░░░░░ 45% │ usage/w █░░░░░░░░░ 16% │ tok 7k │ $1.50 │ 🔧 8 req │ 📝 +10/-3 │ mem: 402 MB │ ram ███████░░░ 12.5/16G
 ```
 
 ## Features
 
 | Element | Description |
 |---------|-------------|
-| `folder [branch*]` | Working directory + git branch, `*` = dirty |
-| `API` / `SUB` | Auth type — API key or Subscription |
-| `ctx ████ 42% / 200k` | Context window usage — green → yellow → red |
-| `usage/d ██ 18% / 1M` | Daily token usage vs limit (blue) |
-| `usage/w █ 9% / 5M` | Weekly token usage vs limit (blue) |
-| `tok 12.3k` | Session tokens (input + output) |
-| `🔧 8 req` | Tool calls since Claude CLI started |
-| `📝 120 lines` | Lines written via Write/Edit tools |
-| Terminal overlay | Cost estimate + tokens after each response (via `gum`) |
+| `folder [branch*]` | Working directory + git branch (`*` = uncommitted changes) |
+| `Opus 4.6` | Current model name (magenta) |
+| `ctx ████ 25% / 200k` | Context window usage with color thresholds |
+| `usage/d ████ 45%` | 5-hour rate limit (blue) |
+| `usage/w █ 16%` | 7-day rate limit (blue) |
+| `tok 7k` | Session tokens (input + output) |
+| `$1.50` | Session cost (USD) |
+| `🔧 8 req` | Tool calls in current session |
+| `📝 +10/-3` | Lines added (green) / removed (red) |
+| `mem: 402 MB` | Claude Code process memory |
+| `ram ███████░░░ 12.5/16G` | System RAM usage with progress bar |
+
+All elements are configurable — enable/disable via `/statusbar` command.
 
 ## Install
 
@@ -30,46 +34,54 @@ source ~/.bashrc
 
 Restart Claude Code — the status bar appears automatically.
 
-## Requirements
+### Cross-platform
 
-- Claude Code CLI
-- Git Bash (Windows) or any POSIX shell (Linux/macOS)
-- `jq` and `gum` — **downloaded automatically** by `install.sh`
+Works on **Windows** (Git Bash / PowerShell) and **Linux/WSL**.
 
-## Configuration
-
-Edit `~/.ai-statusbar/state.json` to adjust usage limits:
-
-```json
-"usage": {
-  "daily_limit": 1000000,
-  "weekly_limit": 5000000
-}
-```
-
-## Customizing Elements
-
-Run the interactive configurator to toggle which elements appear:
+For WSL with shared codebase, symlink to the Windows install:
 
 ```bash
-bash ~/.ai-statusbar/configure.sh
+ln -s /mnt/c/Users/YOUR_USER/.ai-statusbar ~/.ai-statusbar
+bash ~/.ai-statusbar/install.sh
 ```
 
-Or type `/statusbar` in Claude Code.
+## Requirements
 
-Use space to toggle, enter to confirm:
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
+- Git Bash (Windows) or POSIX shell (Linux/macOS)
+- `jq` — downloaded automatically by `install.sh`
+
+## Usage
+
+### `/statusbar` — configure elements
+
+Type `/statusbar` in Claude Code to see current configuration:
 
 ```
-  ◉ Model name
-  ◉ Authentication type
-  ◉ Context window usage
-  ○ Daily rate limit
-  ○ Weekly rate limit
-  ◉ Token counter (session)
-  ◉ Cost per session
-  ◉ Total requests (session)
-  ◉ Code lines written (session)
+AI Status Bar Configuration
+===========================
+ #  Element      Status
+ 1  model        ON
+ 2  context      ON
+ 3  daily_limit  ON
+ 4  weekly_limit ON
+ 5  tokens       ON
+ 6  cost         ON
+ 7  requests     ON
+ 8  lines        ON
+ 9  claude_ram   ON
+10  ram          ON
 ```
+
+Toggle elements:
+
+| Command | Action |
+|---------|--------|
+| `/statusbar` | Show config table |
+| `/statusbar 3 5` | Toggle elements by number |
+| `/statusbar ram off` | Disable specific element |
+| `/statusbar all off` | Disable all elements |
+| `/statusbar on` / `off` | Enable/disable entire status bar |
 
 Settings are saved to `~/.ai-statusbar/config.json` and take effect immediately.
 
@@ -77,34 +89,36 @@ Settings are saved to `~/.ai-statusbar/config.json` and take effect immediately.
 
 ```
 Claude Code
+  ├─ statusLine → statusline.sh
+  │     └─ reads Claude Code JSON (stdin) + state.json + config.json
+  │        outputs colored inline status bar
+  │
   ├─ PostToolUse → hooks/post-tool.sh
-  │     └─ increments requests_count (resets on new claude process)
-  │        counts lines for Write/Edit tools
+  │     └─ increments request counter, counts lines for Write/Edit
   │
-  ├─ Stop → hooks/stop.sh
-  │     └─ accumulates daily/weekly token usage with date rollover
-  │        calculates cost estimate
-  │        renders terminal overlay via render.sh
-  │
-  └─ statusLine → statusline.sh
-        └─ reads Claude Code JSON + state.json
-           outputs colored inline status bar
-
+  └─ Stop → hooks/stop.sh
+        └─ accumulates daily/weekly token usage, calculates cost
 ```
+
+### Performance
+
+- All statusLine JSON fields parsed in a **single jq call**
+- System RAM + Claude process memory fetched in **one PowerShell call** (Windows)
+- RAM data **cached for 30 seconds** to avoid repeated PowerShell startup overhead
+- On Linux: reads `/proc/meminfo` directly (~1ms)
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `install.sh` | One-command setup (downloads jq + gum, patches settings.json) |
-| `statusline.sh` | Claude Code inline status bar |
-| `configure.sh` | Interactive element selector (gum multiselect) |
-| `render.sh` | Terminal overlay after each response (uses gum) |
+| `statusline.sh` | Main status bar renderer (receives JSON from Claude Code) |
+| `install.sh` | One-command setup (downloads jq, patches settings.json) |
 | `hooks/post-tool.sh` | PostToolUse hook — request counter, lines counter |
-| `hooks/stop.sh` | Stop hook — usage tracking, cost estimate |
-| `update-state.sh` | Utility to patch state.json via jq |
-| `state.json` | Session state (excluded from git) |
-| `config.json` | Element visibility config (excluded from git) |
+| `hooks/stop.sh` | Stop hook — daily/weekly usage tracking, cost estimate |
+| `toggle.sh` | Enable/disable statusLine in settings.json |
+| `commands/statusbar.md` | `/statusbar` slash command definition |
+| `config.json` | Element visibility config (gitignored) |
+| `state.json` | Session state (gitignored) |
 
 ## License
 
