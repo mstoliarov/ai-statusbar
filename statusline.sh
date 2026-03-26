@@ -71,8 +71,66 @@ fi
 model=$(echo "$input" | "$JQ" -r '.model.display_name // empty')
 model_short=$(echo "$model" | sed 's/Claude //i' | sed 's/ (.*)//')
 
-# --- Auth type ---
-[ -n "$ANTHROPIC_API_KEY" ] && auth_type="API" || auth_type="SUB"
+
+# --- RAM: system + Claude process (cached 30s on Windows) ---
+RAM_CACHE="$HOME/.ai-statusbar/.ram_cache"
+ram_pct=0; ram_used_gb="0"; ram_total_gb="0"; claude_ram_mb="0"; claude_ram_pct=0
+
+read_ram() {
+  if [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* || "$OS" == "Windows_NT" ]]; then
+    # Single PowerShell call: system RAM + Claude process RAM (found by command line)
+    powershell -NoProfile -Command "
+      \$os = Get-CimInstance Win32_OperatingSystem
+      \$totalKB = \$os.TotalVisibleMemorySize
+      \$freeKB = \$os.FreePhysicalMemory
+      \$cMB = 0
+      \$cp = Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { \$_.CommandLine -match 'claude-code' } | Select-Object -First 1
+      if (\$cp) { try { \$cMB = [math]::Round((Get-Process -Id \$cp.ProcessId).WorkingSet64 / 1MB) } catch {} }
+      \"\$totalKB \$freeKB \$cMB\"
+    " 2>/dev/null | awk '{
+      used=$1-$2; pct=int(used*100/$1)
+      ug=used/1048576; tg=$1/1048576
+      cMB=$3; cpct=int(cMB*1024*100/$1)
+      printf "%d %.1f %.0f %d %d", pct, ug, tg, cMB, cpct
+    }'
+  elif [ -f /proc/meminfo ]; then
+    # Linux: find Claude by command line
+    local c_kb=0
+    local cpid
+    cpid=$(pgrep -f 'claude-code/cli' 2>/dev/null | head -1)
+    if [ -n "$cpid" ] && [ -f "/proc/$cpid/status" ]; then
+      c_kb=$(awk '/^VmRSS:/{print $2}' "/proc/$cpid/status" 2>/dev/null)
+    fi
+    c_kb=${c_kb:-0}
+    awk -v ckb="$c_kb" '/^MemTotal:/{t=$2} /^MemAvailable:/{a=$2} END{
+      u=t-a; pct=int(u*100/t)
+      cMB=int(ckb/1024); cpct=int(ckb*100/t)
+      printf "%d %.1f %.0f %d %d", pct, u/1048576, t/1048576, cMB, cpct
+    }' /proc/meminfo
+  fi
+}
+
+# Use cache if fresh (< 30s), otherwise refresh
+use_cache=0
+if [ -f "$RAM_CACHE" ]; then
+  cache_age=$(( $(date +%s) - $(date -r "$RAM_CACHE" +%s 2>/dev/null || stat -c %Y "$RAM_CACHE" 2>/dev/null || echo 0) ))
+  [ "$cache_age" -lt 30 ] && use_cache=1
+fi
+
+if [ "$use_cache" = "1" ]; then
+  read ram_pct ram_used_gb ram_total_gb claude_ram_mb claude_ram_pct < "$RAM_CACHE"
+else
+  ram_data=$(read_ram "$claude_pid")
+  if [ -n "$ram_data" ]; then
+    echo "$ram_data" > "$RAM_CACHE"
+    read ram_pct ram_used_gb ram_total_gb claude_ram_mb claude_ram_pct <<< "$ram_data"
+  fi
+fi
+
+ram_bar=$(make_bar "$ram_pct")
+ram_color=$(pct_color "$ram_pct")
+claude_ram_bar=$(make_bar "$claude_ram_pct")
+claude_ram_color=$(pct_color "$claude_ram_pct")
 
 # --- Context window ---
 used_pct=$(echo "$input" | "$JQ" -r '.context_window.used_percentage // 0')
@@ -150,10 +208,6 @@ if [ -n "$model_short" ] && [ "$(show_el model)" = "1" ]; then
   segments+=("${MAGENTA}${model_short}${RESET}")
 fi
 
-# Auth type
-if [ "$(show_el auth)" = "1" ]; then
-  segments+=("${MAGENTA}${auth_type}${RESET}")
-fi
 
 # ctx — threshold colors
 if [ "$(show_el context)" = "1" ]; then
@@ -187,7 +241,17 @@ fi
 
 # Lines added/removed
 if [ "$(show_el lines)" = "1" ]; then
-  segments+=("${DIM}📝 +${lines_added}/-${lines_removed}${RESET}")
+  segments+=("${DIM}📝${RESET} ${GREEN}+${lines_added}${RESET}/${RED}-${lines_removed}${RESET}")
+fi
+
+# Claude process RAM
+if [ "$(show_el claude_ram)" = "1" ] && [ "$claude_ram_mb" -gt 0 ]; then
+  segments+=("${ram_color}mem: ${claude_ram_mb} MB${RESET}")
+fi
+
+# System RAM
+if [ "$(show_el ram)" = "1" ] && [ "$ram_pct" -gt 0 ]; then
+  segments+=("${DIM}ram${RESET} ${ram_color}${ram_bar} ${ram_used_gb}/${ram_total_gb}G${RESET}")
 fi
 
 # Join segments with separator (no trailing │)

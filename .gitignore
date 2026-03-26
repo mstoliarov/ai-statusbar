@@ -1,4 +1,5 @@
 state.json
 config.json
 *.tmp
+.ram_cache
 .credentials*
