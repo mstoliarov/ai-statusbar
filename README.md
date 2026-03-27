@@ -26,10 +26,17 @@ All elements are individually toggleable via `/statusbar`.
 
 ## Install
 
+Bash (Git Bash / WSL / Linux):
 ```bash
 git clone https://github.com/mstoliarov/ai-statusbar ~/.ai-statusbar
 bash ~/.ai-statusbar/install.sh
 source ~/.bashrc
+```
+
+PowerShell:
+```powershell
+git clone https://github.com/mstoliarov/ai-statusbar "$env:USERPROFILE\.ai-statusbar"
+bash "$env:USERPROFILE\.ai-statusbar\install.sh"
 ```
 
 Restart Claude Code — the status bar appears automatically.
@@ -73,9 +80,16 @@ Deselect all → status bar disables automatically.
 
 Or from terminal:
 
+Bash:
 ```bash
 bash ~/.ai-statusbar/toggle.sh on
 bash ~/.ai-statusbar/toggle.sh off
+```
+
+PowerShell:
+```powershell
+bash "$env:USERPROFILE\.ai-statusbar\toggle.sh" on
+bash "$env:USERPROFILE\.ai-statusbar\toggle.sh" off
 ```
 
 Settings are saved to `~/.ai-statusbar/config.json` and take effect immediately.
@@ -84,22 +98,44 @@ Settings are saved to `~/.ai-statusbar/config.json` and take effect immediately.
 
 **1. Remove the status bar from Claude Code settings:**
 
+Bash (Git Bash / WSL / Linux):
 ```bash
 ~/bin/jq 'del(.statusLine) | del(.hooks.PostToolUse) | del(.hooks.Stop)' \
   ~/.claude/settings.json > ~/.claude/settings.json.tmp && \
   mv ~/.claude/settings.json.tmp ~/.claude/settings.json
 ```
 
+PowerShell:
+```powershell
+$s = "$env:USERPROFILE\.claude\settings.json"
+(Get-Content $s | ConvertFrom-Json) |
+  Select-Object -Property * -ExcludeProperty statusLine |
+  ForEach-Object { $_.hooks.PSObject.Properties.Remove('PostToolUse'); $_.hooks.PSObject.Properties.Remove('Stop'); $_ } |
+  ConvertTo-Json -Depth 10 | Set-Content $s
+```
+
 **2. Delete the repository:**
 
+Bash:
 ```bash
 rm -rf ~/.ai-statusbar
 ```
 
+PowerShell:
+```powershell
+Remove-Item -Recurse -Force "$env:USERPROFILE\.ai-statusbar"
+```
+
 **3. Remove jq (optional):**
 
+Bash:
 ```bash
 rm -f ~/bin/jq ~/bin/jq.exe
+```
+
+PowerShell:
+```powershell
+Remove-Item -Force "$env:USERPROFILE\bin\jq.exe" -ErrorAction SilentlyContinue
 ```
 
 Restart Claude Code — the status bar will be gone.
