@@ -68,8 +68,8 @@ if echo "$CURRENT" | "$JQ" -e '.hooks.PostToolUse' &>/dev/null && \
   echo "    Claude Code hooks already configured"
 else
   echo "$CURRENT" | "$JQ" '
-    .hooks.PostToolUse = [{"command": "bash ~/.ai-statusbar/hooks/post-tool.sh"}] |
-    .hooks.Stop = [{"command": "bash ~/.ai-statusbar/hooks/stop.sh"}]
+    .hooks.PostToolUse = [{"matcher": "", "hooks": [{"type": "command", "command": "bash ~/.ai-statusbar/hooks/post-tool.sh"}]}] |
+    .hooks.Stop = [{"matcher": "", "hooks": [{"type": "command", "command": "bash ~/.ai-statusbar/hooks/stop.sh"}]}]
   ' > "${CLAUDE_SETTINGS}.tmp" && mv "${CLAUDE_SETTINGS}.tmp" "$CLAUDE_SETTINGS"
   echo "    Claude Code hooks added to settings.json"
 fi
@@ -88,7 +88,7 @@ fi
 # 7. Initialize default config if not present
 CONFIG="$STATUSBAR_DIR/config.json"
 if [[ ! -f "$CONFIG" ]]; then
-  echo '{"show":{"model":true,"context":true,"daily_limit":true,"weekly_limit":true,"tokens":true,"cost":true,"requests":true,"lines":true,"claude_ram":true,"ram":true}}' \
+  echo '{"show":{"workspace":true,"model":true,"context":true,"tokens":true,"cost":true,"daily_limit":true,"weekly_limit":true,"requests":true,"lines":true,"claude_ram":true,"ram":true}}' \
     | "$JQ" '.' > "$CONFIG"
   echo "    Default config.json created (all elements enabled)"
 else

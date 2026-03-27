@@ -11,18 +11,18 @@ Real-time status bar for [Claude Code CLI](https://docs.anthropic.com/en/docs/cl
 | Element | Description |
 |---------|-------------|
 | `folder [branch*]` | Working directory + git branch (`*` = uncommitted changes) |
-| `Opus 4.6` | Current model name (magenta) |
+| `Opus 4.6` | Current model name |
 | `ctx ████ 25% / 200k` | Context window usage with color thresholds |
-| `usage/d ████ 45%` | 5-hour rate limit (blue) |
-| `usage/w █ 16%` | 7-day rate limit (blue) |
+| `usage/d ████ 45%` | 5-hour rate limit |
+| `usage/w █ 16%` | 7-day rate limit |
 | `tok 7k` | Session tokens (input + output) |
 | `$1.50` | Session cost (USD) |
 | `🔧 8 req` | Tool calls in current session |
-| `📝 +10/-3` | Lines added (green) / removed (red) |
+| `📝 +10/-3` | Lines added / removed |
 | `mem: 402 MB` | Claude Code process memory |
-| `ram ███████░░░ 12.5/16G` | System RAM usage with progress bar |
+| `ram ███████░░░ 12.5/16G` | System RAM usage |
 
-All elements are configurable — enable/disable via `/statusbar` command.
+All elements are individually toggleable via `/statusbar`.
 
 ## Install
 
@@ -34,56 +34,75 @@ source ~/.bashrc
 
 Restart Claude Code — the status bar appears automatically.
 
+### Requirements
+
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
+- Git Bash (Windows) or POSIX shell (Linux/macOS)
+- `jq` — downloaded automatically by `install.sh`
+
 ### Cross-platform
 
-Works on **Windows** (Git Bash / PowerShell) and **Linux/WSL**.
+Works on **Windows** (Git Bash) and **Linux/WSL**.
 
-For WSL with shared codebase, symlink to the Windows install:
+WSL with shared Windows install:
 
 ```bash
 ln -s /mnt/c/Users/YOUR_USER/.ai-statusbar ~/.ai-statusbar
 bash ~/.ai-statusbar/install.sh
 ```
 
-## Requirements
-
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)
-- Git Bash (Windows) or POSIX shell (Linux/macOS)
-- `jq` — downloaded automatically by `install.sh`
-
 ## Usage
 
 ### `/statusbar` — configure elements
 
-Type `/statusbar` in Claude Code to see current configuration:
+Type `/statusbar` in Claude Code. A multiselect UI appears with three pages of elements to toggle on/off:
+
+- **General**: workspace, model, context, tokens
+- **Usage**: cost, daily_limit, weekly_limit, requests
+- **System**: lines, claude_ram, ram
+
+Select any elements → status bar enables automatically.
+Deselect all → status bar disables automatically.
+
+### Quick enable/disable
 
 ```
-AI Status Bar Configuration
-===========================
- #  Element      Status
- 1  model        ON
- 2  context      ON
- 3  daily_limit  ON
- 4  weekly_limit ON
- 5  tokens       ON
- 6  cost         ON
- 7  requests     ON
- 8  lines        ON
- 9  claude_ram   ON
-10  ram          ON
+/statusbar on
+/statusbar off
 ```
 
-Toggle elements:
+Or from terminal:
 
-| Command | Action |
-|---------|--------|
-| `/statusbar` | Show config table |
-| `/statusbar 3 5` | Toggle elements by number |
-| `/statusbar ram off` | Disable specific element |
-| `/statusbar all off` | Disable all elements |
-| `/statusbar on` / `off` | Enable/disable entire status bar |
+```bash
+bash ~/.ai-statusbar/toggle.sh on
+bash ~/.ai-statusbar/toggle.sh off
+```
 
 Settings are saved to `~/.ai-statusbar/config.json` and take effect immediately.
+
+## Uninstall
+
+**1. Remove the status bar from Claude Code settings:**
+
+```bash
+~/bin/jq 'del(.statusLine) | del(.hooks.PostToolUse) | del(.hooks.Stop)' \
+  ~/.claude/settings.json > ~/.claude/settings.json.tmp && \
+  mv ~/.claude/settings.json.tmp ~/.claude/settings.json
+```
+
+**2. Delete the repository:**
+
+```bash
+rm -rf ~/.ai-statusbar
+```
+
+**3. Remove jq (optional):**
+
+```bash
+rm -f ~/bin/jq ~/bin/jq.exe
+```
+
+Restart Claude Code — the status bar will be gone.
 
 ## How it works
 
@@ -113,9 +132,9 @@ Claude Code
 |------|---------|
 | `statusline.sh` | Main status bar renderer (receives JSON from Claude Code) |
 | `install.sh` | One-command setup (downloads jq, patches settings.json) |
+| `toggle.sh` | Enable/disable statusLine (`on` / `off` / toggle) |
 | `hooks/post-tool.sh` | PostToolUse hook — request counter, lines counter |
 | `hooks/stop.sh` | Stop hook — daily/weekly usage tracking, cost estimate |
-| `toggle.sh` | Enable/disable statusLine in settings.json |
 | `commands/statusbar.md` | `/statusbar` slash command definition |
 | `config.json` | Element visibility config (gitignored) |
 | `state.json` | Session state (gitignored) |
