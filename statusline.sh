@@ -194,12 +194,14 @@ fi
 SEP="${DIM} │ ${RESET}"
 segments=()
 
-# Folder + git (always shown)
-seg="${BOLD}${CYAN}${folder}${RESET}"
-if [ -n "$git_branch" ]; then
-  seg+=" ${git_color}[${git_branch}${git_status_indicator}]${RESET}"
+# Folder + git
+if [ "$(show_el workspace)" = "1" ]; then
+  seg="${BOLD}${CYAN}${folder}${RESET}"
+  if [ -n "$git_branch" ]; then
+    seg+=" ${git_color}[${git_branch}${git_status_indicator}]${RESET}"
+  fi
+  segments+=("$seg")
 fi
-segments+=("$seg")
 
 # Model
 if [ -n "$model_short" ] && [ "$(show_el model)" = "1" ]; then

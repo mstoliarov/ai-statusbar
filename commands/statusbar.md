@@ -1,41 +1,42 @@
+---
+name: statusbar
+description: Configure the Claude Code status bar — toggle elements on/off, enable/disable the entire bar
+argument-hint: "[on|off]"
+allowed-tools: Bash, AskUserQuestion
+---
+
 # AI Status Bar Configuration
-
-Read the status bar config from `~/.ai-statusbar/config.json` and show the user a clear overview of all elements with their current state.
-
-## Display format
-
-Show a table like this:
-
-```
-AI Status Bar Configuration
-===========================
- #  Element      Status
- 1  model        ON
- 2  context      ON
- 3  daily_limit  ON
- 4  weekly_limit ON
- 5  tokens       ON
- 6  cost         ON
- 7  requests     ON
- 8  lines        ON
- 9  claude_ram   ON
-10  ram          ON
-```
 
 ## Handling arguments
 
-The user may pass arguments after `/statusbar`. Handle them as follows:
+- **`on`**: Enable status bar — run `bash ~/.ai-statusbar/toggle.sh on`
+- **`off`**: Disable status bar — run `bash ~/.ai-statusbar/toggle.sh off`
+- **No arguments or anything else**: Show interactive config (see below)
 
-- **No arguments**: Show the table above and ask "What would you like to change?"
-- **`on` / `off`**: Toggle the entire status bar via `bash ~/.ai-statusbar/toggle.sh`
-- **`<element> on/off`**: Toggle a specific element (e.g., `/statusbar ram off`). Update config.json by setting `.show.<element>` to `true` or `false`.
-- **`all on` / `all off`**: Enable or disable all elements at once.
-- **Number(s)**: Toggle elements by number from the table (e.g., `/statusbar 3 5` toggles daily_limit and tokens).
+## Interactive config (no arguments)
 
-After any change, update `~/.ai-statusbar/config.json` and show the updated table.
+1. Use `AskUserQuestion` with **3 questions** (do NOT read any files beforehand):
 
-## Important
+   **Question 1** (multiSelect) — header: "General", question: "Select elements to show on status bar (1/3):"
+   - workspace — "Working directory and git branch"
+   - model — "Model name (e.g. Opus 4.6)"
+   - context — "Context window progress bar"
+   - tokens — "Total tokens used"
 
-- If `config.json` does not exist, create it with all elements set to `true`.
-- Always preserve the JSON format (use jq if available at `~/bin/jq`).
-- Do NOT modify `~/.claude/settings.json` unless the user says `/statusbar on` or `/statusbar off`.
+   **Question 2** (multiSelect) — header: "Usage", question: "Select elements to show on status bar (2/3):"
+   - cost — "Session cost in USD"
+   - daily_limit — "Daily rate limit bar"
+   - weekly_limit — "Weekly rate limit bar"
+   - requests — "Tool request count"
+
+   **Question 3** (multiSelect) — header: "System", question: "Select elements to show on status bar (3/3):"
+   - lines — "Lines added/removed"
+   - claude_ram — "Claude process memory"
+   - ram — "System RAM progress bar"
+
+2. After user responds:
+   - For Q1-Q3: **selected = ON (`true`)**, **not selected = OFF (`false`)**
+   - Apply changes silently using **two parallel Bash calls**, both with `run_in_background: true`:
+     1. Write `~/.ai-statusbar/config.json` via `cat > ~/.ai-statusbar/config.json << 'EOF'` with the full JSON built from selections
+     2. Run `bash ~/.ai-statusbar/toggle.sh off` (if no elements selected) or `bash ~/.ai-statusbar/toggle.sh on` (if any selected)
+   - **Do NOT output anything after applying changes** — no summaries, no confirmations, no text
