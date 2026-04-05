@@ -56,6 +56,8 @@ else
   WEEK_TOKENS=$TOTAL_TOKENS
 fi
 
+NOW_ISO=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
 # Update state (no counter reset — counters persist per Claude process via PPID in post-tool.sh)
 "$JQ" \
   --argjson ti "$TOKENS_IN" \
@@ -68,6 +70,7 @@ fi
   --argjson today_tok "$TODAY_TOKENS" \
   --arg week_start "$WEEK_START" \
   --argjson week_tok "$WEEK_TOKENS" \
+  --arg now_iso "$NOW_ISO" \
   '.tokens.input = $ti |
    .tokens.output = $to |
    .cost_usd = $cost |
@@ -75,7 +78,7 @@ fi
    (if $model != "" then .model = $model else . end) |
    .provider = "claude" |
    .session.project_dir = $dir |
-   (if .session.start_iso == "" then .session.start_iso = now | todate else . end) |
+   (if .session.start_iso == "" then .session.start_iso = $now_iso else . end) |
    .usage.today = $today |
    .usage.today_tokens = $today_tok |
    .usage.week_start = $week_start |
