@@ -286,7 +286,7 @@ fi
 CONFIG="$HOME/.ai-statusbar/config.json"
 CONFIG_SHOW=""
 if [ -f "$CONFIG" ]; then
-  CONFIG_SHOW=$("$JQ" -r '.show | to_entries[] | "\(.key)=\(.value)"' "$CONFIG" 2>/dev/null)
+  CONFIG_SHOW=$("$JQ" -r 'if has("show") then .show else . end | to_entries[] | "\(.key)=\(.value)"' "$CONFIG" 2>/dev/null)
 fi
 
 # Returns 1 if element should be shown (default: show all when no config)

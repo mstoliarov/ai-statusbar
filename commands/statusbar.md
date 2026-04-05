@@ -37,6 +37,9 @@ allowed-tools: Bash, AskUserQuestion
 2. After user responds:
    - For Q1-Q3: **selected = ON (`true`)**, **not selected = OFF (`false`)**
    - Apply changes silently using **two parallel Bash calls**, both with `run_in_background: true`:
-     1. Write `~/.ai-statusbar/config.json` via `cat > ~/.ai-statusbar/config.json << 'EOF'` with the full JSON built from selections
+     1. Write `~/.ai-statusbar/config.json` via `cat > ~/.ai-statusbar/config.json << 'EOF'` with the full JSON — **must use `{"show": {...}}` wrapper**, e.g.:
+        ```json
+        {"show":{"workspace":true,"model":false,...}}
+        ```
      2. Run `bash ~/.ai-statusbar/toggle.sh off` (if no elements selected) or `bash ~/.ai-statusbar/toggle.sh on` (if any selected)
    - **Do NOT output anything after applying changes** — no summaries, no confirmations, no text
