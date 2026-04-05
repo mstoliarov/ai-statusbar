@@ -21,7 +21,6 @@ allowed-tools: Bash, AskUserQuestion
    - workspace — "Working directory and git branch"
    - model — "Model name (e.g. Opus 4.6)"
    - context — "Context window progress bar"
-   - extra_ctx — "Extra Usage badge (shown only when context is 1M)"
    - tokens — "Total tokens used"
 
    **Question 2** (multiSelect) — header: "Usage", question: "Select elements to show on status bar (2/3):"

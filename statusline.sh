@@ -332,11 +332,6 @@ if [ "$(show_el context)" = "1" ]; then
   fi
 fi
 
-# extra_ctx — auto-shown when Extra Usage (overrides config); config controls non-Extra-Usage visibility
-if [ "$is_extra_usage" = "1" ] || [ "$(show_el extra_ctx)" = "1" ]; then
-  segments+=("${MAGENTA}extra ${ctx_size_fmt}${RESET}")
-fi
-
 # usage/d — 5h rate limit with optional reset time
 if [ "$(show_el daily_limit)" = "1" ]; then
   seg="${LABEL}usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET}"
