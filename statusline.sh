@@ -83,11 +83,6 @@ eval "$("$JQ" -r '
   @sh "lines_removed=\(.cost.total_lines_removed // 0)"
 ' <<< "$input")"
 
-# DEBUG: capture full JSON when Extra Usage active (one-time, for credit balance investigation)
-if echo "$input" | "$JQ" -e '.context_window.context_window_size >= 1000000' >/dev/null 2>&1; then
-  [ ! -f "$HOME/.ai-statusbar/.extra_usage_json" ] && echo "$input" | "$JQ" . > "$HOME/.ai-statusbar/.extra_usage_json" 2>/dev/null
-fi
-
 # --- Detect Extra Usage and API mode ---
 # Extra Usage: context window expands to 1M tokens
 is_extra_usage=0
@@ -99,6 +94,52 @@ is_api_mode=0
 if [ -f "$CREDS" ]; then
   rate_tier=$("$JQ" -r '.claudeAiOauth.rateLimitTier // "default_claude_ai"' "$CREDS" 2>/dev/null)
   [ "$rate_tier" != "default_claude_ai" ] && [ "$rate_tier" != "" ] && is_api_mode=1
+fi
+
+# --- Extra Usage credit balance (GET /api/oauth/usage, cached 1h, background refresh) ---
+extra_balance_str=""
+if [ "$is_extra_usage" = "1" ]; then
+  USAGE_CACHE="$HOME/.ai-statusbar/.usage_cache"
+  USAGE_CACHE_TTL=3600  # 1 hour — matches Claude Code internal cache (A9K=3600000ms)
+
+  cache_age=999999
+  if [ -f "$USAGE_CACHE" ]; then
+    cache_age=$(( now_epoch - $(date -r "$USAGE_CACHE" +%s 2>/dev/null || stat -c %Y "$USAGE_CACHE" 2>/dev/null || echo 0) ))
+  fi
+
+  if [ "$cache_age" -ge "$USAGE_CACHE_TTL" ]; then
+    # Touch cache to prevent duplicate background fetches from parallel renders
+    touch "$USAGE_CACHE" 2>/dev/null
+    # Background fetch — never blocks the statusbar render
+    (
+      _token=$("$JQ" -r '.claudeAiOauth.accessToken // ""' "$CREDS" 2>/dev/null)
+      [ -z "$_token" ] && exit
+      _ssl=""
+      [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* || "$OS" == "Windows_NT" ]] && _ssl="--ssl-no-revoke"
+      _ver=$(find /usr/local/lib /usr/lib "$HOME/AppData/Roaming/npm" -name "package.json" -path "*/claude-code/package.json" 2>/dev/null | head -1 | xargs "$JQ" -r '.version // ""' 2>/dev/null)
+      _ver=${_ver:-2.1.92}
+      _resp=$(curl -s $_ssl --max-time 5 \
+        -H "Authorization: Bearer $_token" \
+        -H "anthropic-beta: oauth-2025-04-20" \
+        -H "Content-Type: application/json" \
+        -H "User-Agent: claude-code/${_ver}; +https://support.anthropic.com/" \
+        -H "x-service-name: claude-code" \
+        "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
+      # Only write cache on successful response (has extra_usage field)
+      echo "$_resp" | "$JQ" -e '.extra_usage' >/dev/null 2>&1 && echo "$_resp" > "$USAGE_CACHE"
+    ) &
+  fi
+
+  # Display from cache (stale-while-revalidate)
+  if [ -f "$USAGE_CACHE" ] && [ "$(stat -c %s "$USAGE_CACHE" 2>/dev/null || stat -f %z "$USAGE_CACHE" 2>/dev/null || echo 0)" -gt 10 ]; then
+    _used=$("$JQ" -r '.extra_usage.used_credits // 0' "$USAGE_CACHE" 2>/dev/null)
+    _limit=$("$JQ" -r '.extra_usage.monthly_limit // 0' "$USAGE_CACHE" 2>/dev/null)
+    if [ "$_limit" -gt 0 ] 2>/dev/null; then
+      _used_fmt=$(awk "BEGIN {printf \"%.2f\", $_used/100}")
+      _limit_fmt=$(awk "BEGIN {printf \"%.2f\", $_limit/100}")
+      extra_balance_str="\$${_used_fmt}/\$${_limit_fmt}"
+    fi
+  fi
 fi
 
 [ -z "$cwd" ] && cwd=$(pwd)
@@ -309,7 +350,13 @@ fi
 
 # Cost — auto-shown for Extra Usage and API mode (overrides config); config controls normal visibility
 if [ "$is_extra_usage" = "1" ] || [ "$is_api_mode" = "1" ] || [ "$(show_el cost)" = "1" ]; then
-  segments+=("${LABEL}\$${cost_fmt}${RESET}")
+  if [ -n "$extra_balance_str" ]; then
+    # Extra Usage subscription: show credit balance (spent/total) in magenta
+    segments+=("${MAGENTA}${extra_balance_str}${RESET}")
+  else
+    # Normal or API: show session cost
+    segments+=("${LABEL}\$${cost_fmt}${RESET}")
+  fi
 fi
 
 # Requests counter
