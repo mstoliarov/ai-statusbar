@@ -83,6 +83,24 @@ eval "$("$JQ" -r '
   @sh "lines_removed=\(.cost.total_lines_removed // 0)"
 ' <<< "$input")"
 
+# DEBUG: capture full JSON when Extra Usage active (one-time, for credit balance investigation)
+if echo "$input" | "$JQ" -e '.context_window.context_window_size >= 1000000' >/dev/null 2>&1; then
+  [ ! -f "$HOME/.ai-statusbar/.extra_usage_json" ] && echo "$input" | "$JQ" . > "$HOME/.ai-statusbar/.extra_usage_json" 2>/dev/null
+fi
+
+# --- Detect Extra Usage and API mode ---
+# Extra Usage: context window expands to 1M tokens
+is_extra_usage=0
+[ "$ctx_size" -ge 1000000 ] && is_extra_usage=1
+
+# API mode: rateLimitTier in credentials is not "default_claude_ai"
+CREDS="$HOME/.claude/.credentials.json"
+is_api_mode=0
+if [ -f "$CREDS" ]; then
+  rate_tier=$("$JQ" -r '.claudeAiOauth.rateLimitTier // "default_claude_ai"' "$CREDS" 2>/dev/null)
+  [ "$rate_tier" != "default_claude_ai" ] && [ "$rate_tier" != "" ] && is_api_mode=1
+fi
+
 [ -z "$cwd" ] && cwd=$(pwd)
 folder=$(basename "$cwd")
 
@@ -257,8 +275,8 @@ if [ "$(show_el context)" = "1" ]; then
   fi
 fi
 
-# extra_ctx — shown only when Extra Usage (ctx_size >= 1M)
-if [ "$(show_el extra_ctx)" = "1" ] && [ "$ctx_size" -ge 1000000 ]; then
+# extra_ctx — auto-shown when Extra Usage (overrides config); config controls non-Extra-Usage visibility
+if [ "$is_extra_usage" = "1" ] || [ "$(show_el extra_ctx)" = "1" ]; then
   segments+=("${MAGENTA}extra ${ctx_size_fmt}${RESET}")
 fi
 
@@ -289,8 +307,8 @@ if [ "$(show_el tokens)" = "1" ]; then
   segments+=("${LABEL}tok${RESET} ${GREEN}${tok_in_fmt}${RESET}${DIM}/${RESET}${RED}${tok_out_fmt}${RESET}")
 fi
 
-# Cost
-if [ "$(show_el cost)" = "1" ]; then
+# Cost — auto-shown for Extra Usage and API mode (overrides config); config controls normal visibility
+if [ "$is_extra_usage" = "1" ] || [ "$is_api_mode" = "1" ] || [ "$(show_el cost)" = "1" ]; then
   segments+=("${LABEL}\$${cost_fmt}${RESET}")
 fi
 
