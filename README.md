@@ -108,6 +108,13 @@ cd "$env:USERPROFILE\.ai-statusbar"; git pull
 
 No restart needed — changes take effect on the next prompt.
 
+**First time updating from an older install?** Register the `/statusbar` command if missing:
+
+```bash
+mkdir -p ~/.claude/commands
+ln -sf ~/.ai-statusbar/commands/statusbar.md ~/.claude/commands/statusbar.md
+```
+
 ## Uninstall
 
 **1. Remove the status bar from Claude Code settings:**

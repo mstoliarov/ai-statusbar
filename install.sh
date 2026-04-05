@@ -85,7 +85,18 @@ else
   echo "    statusLine configured"
 fi
 
-# 7. Initialize default config if not present
+# 7. Register /statusbar slash command in ~/.claude/commands/
+CLAUDE_COMMANDS_DIR="$HOME/.claude/commands"
+mkdir -p "$CLAUDE_COMMANDS_DIR"
+COMMAND_TARGET="$CLAUDE_COMMANDS_DIR/statusbar.md"
+if [[ ! -e "$COMMAND_TARGET" ]]; then
+  ln -sf "$STATUSBAR_DIR/commands/statusbar.md" "$COMMAND_TARGET"
+  echo "    /statusbar command registered"
+else
+  echo "    /statusbar command already registered"
+fi
+
+# 8. Initialize default config if not present
 CONFIG="$STATUSBAR_DIR/config.json"
 if [[ ! -f "$CONFIG" ]]; then
   echo '{"show":{"workspace":true,"model":true,"context":true,"tokens":true,"cost":true,"daily_limit":true,"weekly_limit":true,"requests":true,"lines":true,"claude_ram":true,"ram":true}}' \
