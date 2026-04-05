@@ -107,20 +107,21 @@ if [ "$is_extra_usage" = "1" ]; then
     cache_age=$(( now_epoch - $(date -r "$USAGE_CACHE" +%s 2>/dev/null || stat -c %Y "$USAGE_CACHE" 2>/dev/null || echo 0) ))
   fi
 
-  if [ "$cache_age" -ge "$USAGE_CACHE_TTL" ]; then
-    # Touch cache to prevent duplicate background fetches from parallel renders
-    touch "$USAGE_CACHE" 2>/dev/null
+  RETRY_FILE="$HOME/.ai-statusbar/.usage_retry_after"
+  # Skip fetch if within Retry-After backoff window
+  _blocked=0
+  if [ -f "$RETRY_FILE" ]; then
+    retry_at=$(cat "$RETRY_FILE" 2>/dev/null || echo 0)
+    [ "$now_epoch" -lt "${retry_at:-0}" ] && _blocked=1
+  fi
+
+  if [ "$cache_age" -ge "$USAGE_CACHE_TTL" ] && [ "$_blocked" = "0" ]; then
+    # Set a 60-second fetch-in-progress lock to prevent duplicate background fetches
+    echo $(( now_epoch + 60 )) > "$RETRY_FILE"
     # Background fetch — never blocks the statusbar render
     (
-      # Respect Retry-After: skip if still in backoff window
-      RETRY_FILE="$HOME/.ai-statusbar/.usage_retry_after"
-      if [ -f "$RETRY_FILE" ]; then
-        retry_at=$(cat "$RETRY_FILE" 2>/dev/null)
-        [ "$now_epoch" -lt "${retry_at:-0}" ] && exit
-      fi
-
       _token=$("$JQ" -r '.claudeAiOauth.accessToken // ""' "$CREDS" 2>/dev/null)
-      [ -z "$_token" ] && exit
+      [ -z "$_token" ] && rm -f "$RETRY_FILE" && exit
       _ssl=""
       [[ "$OSTYPE" == msys* || "$OSTYPE" == cygwin* || "$OS" == "Windows_NT" ]] && _ssl="--ssl-no-revoke"
       _ver=$(find /usr/local/lib /usr/lib "$HOME/AppData/Roaming/npm" -name "package.json" -path "*/claude-code/package.json" 2>/dev/null | head -1 | xargs "$JQ" -r '.version // ""' 2>/dev/null)
@@ -132,16 +133,15 @@ if [ "$is_extra_usage" = "1" ]; then
         -H "User-Agent: claude-code/${_ver}; +https://support.anthropic.com/" \
         -H "x-service-name: claude-code" \
         "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
-      # Extract Retry-After header and save backoff deadline
-      retry_after=$(echo "$_resp" | grep -i "^Retry-After:" | awk '{print $2}' | tr -d '\r')
-      if [ -n "$retry_after" ] && [ "$retry_after" -gt 0 ] 2>/dev/null; then
-        echo $(( now_epoch + retry_after )) > "$RETRY_FILE"
+      # Extract Retry-After header on rate limit — save long backoff
+      _retry_after=$(echo "$_resp" | grep -i "^Retry-After:" | awk '{print $2}' | tr -d '\r')
+      if [ -n "$_retry_after" ] && [ "$_retry_after" -gt 0 ] 2>/dev/null; then
+        echo $(( now_epoch + _retry_after )) > "$RETRY_FILE"
         exit
       fi
+      # Success — remove lock, strip HTTP headers, write cache
       rm -f "$RETRY_FILE"
-      # Strip HTTP headers, keep JSON body
       _body=$(echo "$_resp" | sed -n '/^{/,$ p' | head -1)
-      # Only write cache on successful response (has extra_usage field)
       echo "$_body" | "$JQ" -e '.extra_usage' >/dev/null 2>&1 && echo "$_body" > "$USAGE_CACHE"
     ) &
   fi
