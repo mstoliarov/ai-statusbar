@@ -3,7 +3,7 @@
 Real-time status bar for [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code).
 
 ```
-.ai-statusbar [master*] │ Opus 4.6 │ ctx ██░░░░░░░░ 25% / 200k │ usage/d ████░░░░░░ 45% │ usage/w █░░░░░░░░░ 16% │ tok 7k │ $1.50 │ 🔧 8 req │ 📝 +10/-3 │ mem: 402 MB │ ram ███████░░░ 12.5/16G
+.ai-statusbar [master*] │ Sonnet 4.6 │ ctx ████░░░░░░ 49% / 200k │ usage/d █████░░░░░ 53% (3h 20m) │ usage/w ████░░░░░░ 42% (2d 10h) │ tok 3k/63k │ $2.75 │ 🔧 8 req │ 📝 +10/-3 │ ram ███████░░░ 12.5/16G
 ```
 
 ## Features
@@ -11,11 +11,12 @@ Real-time status bar for [Claude Code CLI](https://docs.anthropic.com/en/docs/cl
 | Element | Description |
 |---------|-------------|
 | `folder [branch*]` | Working directory + git branch (`*` = uncommitted changes) |
-| `Opus 4.6` | Current model name |
-| `ctx ████ 25% / 200k` | Context window usage with color thresholds |
-| `usage/d ████ 45%` | 5-hour rate limit |
-| `usage/w █ 16%` | 7-day rate limit |
-| `tok 7k` | Session tokens (input + output) |
+| `Sonnet 4.6` | Current model name |
+| `ctx ████ 49% / 200k` | Context window usage with color thresholds; size in magenta when Extra Usage (1M) |
+| `extra 1.0M` | Extra Usage badge — shown only when context window is 1M tokens |
+| `usage/d █████ 53% (3h 20m)` | 5-hour rate limit + time until reset |
+| `usage/w ████ 42% (2d 10h)` | 7-day rate limit + time until reset |
+| `tok 3k/63k` | Session tokens: input (green) / output (red) |
 | `$1.50` | Session cost (USD) |
 | `🔧 8 req` | Tool calls in current session |
 | `📝 +10/-3` | Lines added / removed |
@@ -64,7 +65,7 @@ bash ~/.ai-statusbar/install.sh
 
 Type `/statusbar` in Claude Code. A multiselect UI appears with three pages of elements to toggle on/off:
 
-- **General**: workspace, model, context, tokens
+- **General**: workspace, model, context, extra_ctx, tokens
 - **Usage**: cost, daily_limit, weekly_limit, requests
 - **System**: lines, claude_ram, ram
 
@@ -93,6 +94,19 @@ bash "$env:USERPROFILE\.ai-statusbar\toggle.sh" off
 ```
 
 Settings are saved to `~/.ai-statusbar/config.json` and take effect immediately.
+
+## Update
+
+```bash
+cd ~/.ai-statusbar && git pull
+```
+
+PowerShell:
+```powershell
+cd "$env:USERPROFILE\.ai-statusbar"; git pull
+```
+
+No restart needed — changes take effect on the next prompt.
 
 ## Uninstall
 
