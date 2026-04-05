@@ -17,6 +17,7 @@ RED="\033[31m"
 MAGENTA="\033[35m"
 BLUE="\033[34m"
 DIM="\033[2m"
+LABEL="\033[0;37m"   # normal white — visible on dark AND light themes
 
 # Progress bar generator (width=10)
 make_bar() {
@@ -250,9 +251,9 @@ fi
 # ctx — threshold colors; MAGENTA size when Extra Usage (ctx_size >= 1M)
 if [ "$(show_el context)" = "1" ]; then
   if [ "$ctx_size" -ge 1000000 ]; then
-    segments+=("${DIM}ctx${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}%${RESET} ${MAGENTA}/ ${ctx_size_fmt}${RESET}")
+    segments+=("${LABEL}ctx${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}%${RESET} ${MAGENTA}/ ${ctx_size_fmt}${RESET}")
   else
-    segments+=("${DIM}ctx${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}% / ${ctx_size_fmt}${RESET}")
+    segments+=("${LABEL}ctx${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}% / ${ctx_size_fmt}${RESET}")
   fi
 fi
 
@@ -263,7 +264,7 @@ fi
 
 # usage/d — 5h rate limit with optional reset time
 if [ "$(show_el daily_limit)" = "1" ]; then
-  seg="${DIM}usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET}"
+  seg="${LABEL}usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET}"
   if [ -n "$daily_reset_str" ]; then
     if [ "$daily_reset_approx" = "1" ]; then
       seg+=" ${DIM}(~${daily_reset_str})${RESET}"
@@ -276,7 +277,7 @@ fi
 
 # usage/w — 7d rate limit with optional reset time
 if [ "$(show_el weekly_limit)" = "1" ]; then
-  seg="${DIM}usage/w${RESET} ${BLUE}${usage_7d_bar} ${usage_7d_int}%${RESET}"
+  seg="${LABEL}usage/w${RESET} ${BLUE}${usage_7d_bar} ${usage_7d_int}%${RESET}"
   if [ -n "$weekly_reset_str" ]; then
     seg+=" ${DIM}(${weekly_reset_str})${RESET}"
   fi
@@ -285,12 +286,12 @@ fi
 
 # Token counter
 if [ "$(show_el tokens)" = "1" ]; then
-  segments+=("${DIM}tok${RESET} ${GREEN}${tok_in_fmt}${RESET}${DIM}/${RESET}${RED}${tok_out_fmt}${RESET}")
+  segments+=("${LABEL}tok${RESET} ${GREEN}${tok_in_fmt}${RESET}${DIM}/${RESET}${RED}${tok_out_fmt}${RESET}")
 fi
 
 # Cost
 if [ "$(show_el cost)" = "1" ]; then
-  segments+=("${DIM}\$${cost_fmt}${RESET}")
+  segments+=("${LABEL}\$${cost_fmt}${RESET}")
 fi
 
 # Requests counter
@@ -300,7 +301,7 @@ fi
 
 # Lines added/removed
 if [ "$(show_el lines)" = "1" ]; then
-  segments+=("${DIM}📝${RESET} ${GREEN}+${lines_added}${RESET}/${RED}-${lines_removed}${RESET}")
+  segments+=("${LABEL}📝${RESET} ${GREEN}+${lines_added}${RESET}/${RED}-${lines_removed}${RESET}")
 fi
 
 # Claude process RAM
@@ -310,7 +311,7 @@ fi
 
 # System RAM
 if [ "$(show_el ram)" = "1" ] && [ "$ram_pct" -gt 0 ]; then
-  segments+=("${DIM}ram${RESET} ${ram_color}${ram_bar} ${ram_used_gb}/${ram_total_gb}G${RESET}")
+  segments+=("${LABEL}ram${RESET} ${ram_color}${ram_bar} ${ram_used_gb}/${ram_total_gb}G${RESET}")
 fi
 
 # Join segments with separator (no trailing │)
