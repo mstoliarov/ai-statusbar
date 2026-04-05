@@ -39,6 +39,22 @@ pct_color() {
   fi
 }
 
+# Format seconds as human duration: 7320 → "2h 2m", 90061 → "1d 1h"
+fmt_duration() {
+  local secs=$1
+  [ "$secs" -le 0 ] && printf "now" && return
+  local d=$(( secs / 86400 ))
+  local h=$(( (secs % 86400) / 3600 ))
+  local m=$(( (secs % 3600) / 60 ))
+  if [ $d -gt 0 ]; then
+    printf "%dd %dh" $d $h
+  elif [ $h -gt 0 ]; then
+    printf "%dh %dm" $h $m
+  else
+    printf "%dm" $m
+  fi
+}
+
 # Format large numbers: 1234567 → 1.2M, 45000 → 45k
 fmt_num() {
   local n=$1
@@ -59,6 +75,8 @@ eval "$("$JQ" -r '
   @sh "tok_out=\(.context_window.total_output_tokens // 0)",
   @sh "usage_5h=\(.rate_limits.five_hour.used_percentage // 0)",
   @sh "usage_7d=\(.rate_limits.seven_day.used_percentage // 0)",
+  @sh "five_hour_resets_at=\(.rate_limits.five_hour.resets_at // 0)",
+  @sh "seven_day_resets_at=\(.rate_limits.seven_day.resets_at // 0)",
   @sh "cost=\(.cost.total_cost_usd // 0)",
   @sh "lines_added=\(.cost.total_lines_added // 0)",
   @sh "lines_removed=\(.cost.total_lines_removed // 0)"
@@ -151,7 +169,8 @@ ctx_bar=$(make_bar "$used_pct_int")
 ctx_size_fmt=$(fmt_num "$ctx_size")
 
 tok_total=$(( tok_in + tok_out ))
-tok_fmt=$(fmt_num "$tok_total")
+tok_in_fmt=$(fmt_num "$tok_in")
+tok_out_fmt=$(fmt_num "$tok_out")
 
 usage_5h_int=$(printf "%.0f" "$usage_5h")
 usage_5h_bar=$(make_bar "$usage_5h_int")
@@ -159,10 +178,29 @@ usage_5h_bar=$(make_bar "$usage_5h_int")
 usage_7d_int=$(printf "%.0f" "$usage_7d")
 usage_7d_bar=$(make_bar "$usage_7d_int")
 
+# --- State file (used for reset tracking and request counter) ---
+STATE="$HOME/.ai-statusbar/state.json"
+
+# --- Time until rate limit resets (resets_at is Unix epoch from statusLine JSON) ---
+daily_reset_str=""
+weekly_reset_str=""
+now_epoch=$(date +%s)
+
+if [ "$five_hour_resets_at" -gt 0 ] && [ "$usage_5h_int" -gt 0 ]; then
+  secs_left=$(( five_hour_resets_at - now_epoch ))
+  [ $secs_left -lt 0 ] && secs_left=0
+  daily_reset_str=$(fmt_duration "$secs_left")
+fi
+
+if [ "$seven_day_resets_at" -gt 0 ]; then
+  secs_left=$(( seven_day_resets_at - now_epoch ))
+  [ $secs_left -lt 0 ] && secs_left=0
+  weekly_reset_str=$(fmt_duration "$secs_left")
+fi
+
 cost_fmt=$(awk "BEGIN { printf \"%.2f\", $cost }")
 
-# --- Request counter from state.json (PPID-based session) ---
-STATE="$HOME/.ai-statusbar/state.json"
+# --- Request counter from state.json ---
 requests=0
 if [ -f "$STATE" ]; then
   requests=$("$JQ" -r '.requests_count // 0' "$STATE" 2>/dev/null || echo 0)
@@ -209,24 +247,45 @@ if [ -n "$model_short" ] && [ "$(show_el model)" = "1" ]; then
 fi
 
 
-# ctx — threshold colors
+# ctx — threshold colors; MAGENTA size when Extra Usage (ctx_size >= 1M)
 if [ "$(show_el context)" = "1" ]; then
-  segments+=("${DIM}ctx${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}% / ${ctx_size_fmt}${RESET}")
+  if [ "$ctx_size" -ge 1000000 ]; then
+    segments+=("${DIM}ctx${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}%${RESET} ${MAGENTA}/ ${ctx_size_fmt}${RESET}")
+  else
+    segments+=("${DIM}ctx${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}% / ${ctx_size_fmt}${RESET}")
+  fi
 fi
 
-# usage/d — 5h rate limit (matches /usage "Current session")
+# extra_ctx — shown only when Extra Usage (ctx_size >= 1M)
+if [ "$(show_el extra_ctx)" = "1" ] && [ "$ctx_size" -ge 1000000 ]; then
+  segments+=("${MAGENTA}extra ${ctx_size_fmt}${RESET}")
+fi
+
+# usage/d — 5h rate limit with optional reset time
 if [ "$(show_el daily_limit)" = "1" ]; then
-  segments+=("${DIM}usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET}")
+  seg="${DIM}usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET}"
+  if [ -n "$daily_reset_str" ]; then
+    if [ "$daily_reset_approx" = "1" ]; then
+      seg+=" ${DIM}(~${daily_reset_str})${RESET}"
+    else
+      seg+=" ${DIM}(${daily_reset_str})${RESET}"
+    fi
+  fi
+  segments+=("$seg")
 fi
 
-# usage/w — 7d rate limit (matches /usage "Current week")
+# usage/w — 7d rate limit with optional reset time
 if [ "$(show_el weekly_limit)" = "1" ]; then
-  segments+=("${DIM}usage/w${RESET} ${BLUE}${usage_7d_bar} ${usage_7d_int}%${RESET}")
+  seg="${DIM}usage/w${RESET} ${BLUE}${usage_7d_bar} ${usage_7d_int}%${RESET}"
+  if [ -n "$weekly_reset_str" ]; then
+    seg+=" ${DIM}(${weekly_reset_str})${RESET}"
+  fi
+  segments+=("$seg")
 fi
 
 # Token counter
 if [ "$(show_el tokens)" = "1" ]; then
-  segments+=("${DIM}tok${RESET} ${CYAN}${tok_fmt}${RESET}")
+  segments+=("${DIM}tok${RESET} ${GREEN}${tok_in_fmt}${RESET}${DIM}/${RESET}${RED}${tok_out_fmt}${RESET}")
 fi
 
 # Cost

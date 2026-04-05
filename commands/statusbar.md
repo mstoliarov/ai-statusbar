@@ -21,12 +21,13 @@ allowed-tools: Bash, AskUserQuestion
    - workspace — "Working directory and git branch"
    - model — "Model name (e.g. Opus 4.6)"
    - context — "Context window progress bar"
+   - extra_ctx — "Extra Usage badge (shown only when context is 1M)"
    - tokens — "Total tokens used"
 
    **Question 2** (multiSelect) — header: "Usage", question: "Select elements to show on status bar (2/3):"
    - cost — "Session cost in USD"
-   - daily_limit — "Daily rate limit bar"
-   - weekly_limit — "Weekly rate limit bar"
+   - daily_limit — "Daily rate limit bar + time to reset"
+   - weekly_limit — "Weekly rate limit bar + time to reset"
    - requests — "Tool request count"
 
    **Question 3** (multiSelect) — header: "System", question: "Select elements to show on status bar (3/3):"
