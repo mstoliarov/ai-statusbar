@@ -204,6 +204,7 @@ read_ram() {
     local c_kb=0
     local cpid
     cpid=$(pgrep -f 'claude-code/cli' 2>/dev/null | head -1)
+    [ -z "$cpid" ] && cpid=$(pgrep -x 'claude' 2>/dev/null | head -1)
     if [ -n "$cpid" ] && [ -f "/proc/$cpid/status" ]; then
       c_kb=$(awk '/^VmRSS:/{print $2}' "/proc/$cpid/status" 2>/dev/null)
     fi

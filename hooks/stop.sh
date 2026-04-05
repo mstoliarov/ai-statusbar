@@ -14,6 +14,8 @@ MODEL=$(echo "$INPUT" | "$JQ" -r '.model // ""')
 # Token counts — read from state.json (saved by statusline.sh from live JSON, more reliable than Stop payload)
 TOKENS_IN=$("$JQ" -r '.tokens.input // 0' "$STATE")
 TOKENS_OUT=$("$JQ" -r '.tokens.output // 0' "$STATE")
+TOKENS_IN=${TOKENS_IN:-0}
+TOKENS_OUT=${TOKENS_OUT:-0}
 
 # Fallback: try Stop hook payload fields if state has 0
 if [[ "$TOKENS_IN" == "0" ]]; then
