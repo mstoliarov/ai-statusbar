@@ -7,6 +7,15 @@ export PATH="$HOME/bin:$PATH"
 JQ="$HOME/bin/jq"
 input=$(cat)
 
+# --- Model and Context Window Mapping ---
+get_default_ctx_size() {
+  local m="$1"
+  case "$m" in
+    *"gemma4:31b-cloud"*) echo 258000 ;;
+    *) echo 200000 ;;
+  esac
+}
+
 # ANSI colors
 RESET="\033[0m"
 BOLD="\033[1m"
@@ -71,7 +80,7 @@ eval "$("$JQ" -r '
   @sh "cwd=\(.workspace.current_dir // .cwd // "")",
   @sh "model=\(.model.display_name // "")",
   @sh "used_pct=\(.context_window.used_percentage // 0)",
-  @sh "ctx_size=\(.context_window.context_window_size // 200000)",
+  @sh "ctx_size=\(.context_window.context_window_size // 0)",
   @sh "tok_in=\(.context_window.total_input_tokens // 0)",
   @sh "tok_out=\(.context_window.total_output_tokens // 0)",
   @sh "usage_5h=\(.rate_limits.five_hour.used_percentage // 0)",
@@ -84,6 +93,9 @@ eval "$("$JQ" -r '
 ' <<< "$input")"
 
 # --- Detect Extra Usage and API mode ---
+# Override context size for specific models regardless of JSON value
+ctx_size=$(get_default_ctx_size "$model")
+
 # Extra Usage: context window expands to 1M tokens
 is_extra_usage=0
 [ "$ctx_size" -ge 1000000 ] && is_extra_usage=1
