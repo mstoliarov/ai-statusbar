@@ -398,11 +398,11 @@ if [ "$show_short" = "1" ]; then
         s_bar=$(make_bar "$s_pct_int")
         seg="${LABEL}usage/h${RESET} ${BLUE}${s_bar} ${s_pct_int}% ${s_label} ${DIM}(${s_used}/${s_limit})${RESET}"
         segments+=("$seg")
-    elif [ -z "$provider_id" ] && [ -n "$daily_reset_str" ]; then
-        # Fallback — Anthropic direct mode (existing logic)
+    elif { [ -z "$provider_id" ] || [ "$provider_id" = "anthropic" ]; } && [ -n "$daily_reset_str" ]; then
+        # Fallback — Anthropic mode (direct or via proxy)
         seg="${LABEL}usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET} ${DIM}(${daily_reset_str})${RESET}"
         segments+=("$seg")
-    elif [ -z "$provider_id" ]; then
+    elif [ -z "$provider_id" ] || [ "$provider_id" = "anthropic" ]; then
         seg="${LABEL}usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET}"
         if [ -n "$daily_reset_str" ]; then
             if [ "$daily_reset_approx" = "1" ]; then
@@ -430,10 +430,10 @@ if [ "$show_long" = "1" ]; then
         [ "$stale" = "1" ] && dim_suffix="${DIM}"
         seg="${dim_suffix}${LABEL}usage/d${RESET} ${BLUE}${l_bar} ${l_pct_int}% ${l_label} ${DIM}(${l_used}/${l_limit})${RESET}"
         segments+=("$seg")
-    elif [ -z "$provider_id" ] && [ -n "$weekly_reset_str" ]; then
+    elif { [ -z "$provider_id" ] || [ "$provider_id" = "anthropic" ]; } && [ -n "$weekly_reset_str" ]; then
         seg="${LABEL}usage/w${RESET} ${BLUE}${usage_7d_bar} ${usage_7d_int}%${RESET} ${DIM}(${weekly_reset_str})${RESET}"
         segments+=("$seg")
-    elif [ -z "$provider_id" ]; then
+    elif [ -z "$provider_id" ] || [ "$provider_id" = "anthropic" ]; then
         seg="${LABEL}usage/w${RESET} ${BLUE}${usage_7d_bar} ${usage_7d_int}%${RESET}"
         if [ -n "$weekly_reset_str" ]; then
             seg+=" ${DIM}(${weekly_reset_str})${RESET}"
