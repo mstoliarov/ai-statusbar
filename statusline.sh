@@ -96,6 +96,36 @@ if [ -f "$CREDS" ]; then
   [ "$rate_tier" != "default_claude_ai" ] && [ "$rate_tier" != "" ] && is_api_mode=1
 fi
 
+# --- Provider state from proxy /status ---
+STATUS_URL="${CLAUDE_STATUS_URL:-http://127.0.0.1:11436/status}"
+provider_id=""
+provider_icon=""
+provider_color_name=""
+provider_display=""
+ctx_size_override=""
+usage_short_json=""
+usage_long_json=""
+stale=0
+
+if command -v curl >/dev/null 2>&1; then
+    proxy_status=$(curl -s --max-time 0.3 "$STATUS_URL" 2>/dev/null)
+    if [ -n "$proxy_status" ] && echo "$proxy_status" | "$JQ" -e '.provider' >/dev/null 2>&1; then
+        provider_id=$(echo "$proxy_status" | "$JQ" -r '.provider.id // ""')
+        provider_icon=$(echo "$proxy_status" | "$JQ" -r '.provider.icon // ""')
+        provider_color_name=$(echo "$proxy_status" | "$JQ" -r '.provider.color // ""')
+        provider_display=$(echo "$proxy_status" | "$JQ" -r '.provider.display // ""')
+        ctx_size_override=$(echo "$proxy_status" | "$JQ" -r '.model.context_window // empty')
+        usage_short_json=$(echo "$proxy_status" | "$JQ" -c '.usage.short // empty')
+        usage_long_json=$(echo "$proxy_status" | "$JQ" -c '.usage.long // empty')
+        [ "$(echo "$proxy_status" | "$JQ" -r '.stale // false')" = "true" ] && stale=1
+    fi
+fi
+
+# Override ctx_size if proxy returned a real context window
+if [ -n "$ctx_size_override" ] && [ "$ctx_size_override" != "null" ]; then
+    ctx_size="$ctx_size_override"
+fi
+
 # --- Extra Usage credit balance (GET /api/oauth/usage, cached 1h, background refresh) ---
 extra_balance_str=""
 if [ "$is_extra_usage" = "1" ]; then
@@ -318,9 +348,31 @@ if [ "$(show_el workspace)" = "1" ]; then
   segments+=("$seg")
 fi
 
-# Model
+# Map provider color name → ANSI escape
+provider_ansi() {
+    case "$1" in
+        orange) printf '\033[38;5;208m' ;;
+        white)  printf '\033[37m' ;;
+        cyan)   printf '\033[36m' ;;
+        blue)   printf '\033[34m' ;;
+        red)    printf '\033[31m' ;;
+        yellow) printf '\033[33m' ;;
+        *)      printf '\033[0m' ;;
+    esac
+}
+
+# Model — with provider icon + color if known
 if [ -n "$model_short" ] && [ "$(show_el model)" = "1" ]; then
-  segments+=("${MAGENTA}${model_short}${RESET}")
+    if [ -n "$provider_id" ]; then
+        pc=$(provider_ansi "$provider_color_name")
+        prefix=""
+        if [ "$(show_el provider_icon)" != "0" ]; then
+            prefix="${provider_icon}${provider_display} "
+        fi
+        segments+=("${pc}${prefix}${model_short}${RESET}")
+    else
+        segments+=("${MAGENTA}${model_short}${RESET}")
+    fi
 fi
 
 
@@ -333,26 +385,61 @@ if [ "$(show_el context)" = "1" ]; then
   fi
 fi
 
-# usage/d — 5h rate limit with optional reset time
-if [ "$(show_el daily_limit)" = "1" ]; then
-  seg="${LABEL}usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET}"
-  if [ -n "$daily_reset_str" ]; then
-    if [ "$daily_reset_approx" = "1" ]; then
-      seg+=" ${DIM}(~${daily_reset_str})${RESET}"
-    else
-      seg+=" ${DIM}(${daily_reset_str})${RESET}"
+# usage/h — short window (from /status when available, else Anthropic 5h fallback)
+show_short=$(show_el usage_short)
+[ -z "$show_short" ] && show_short=$(show_el daily_limit)  # backward compat
+if [ "$show_short" = "1" ]; then
+    if [ -n "$usage_short_json" ]; then
+        s_label=$(echo "$usage_short_json" | "$JQ" -r '.label // "rpm"')
+        s_pct=$(echo "$usage_short_json" | "$JQ" -r '.pct // 0')
+        s_used=$(echo "$usage_short_json" | "$JQ" -r '.used // 0')
+        s_limit=$(echo "$usage_short_json" | "$JQ" -r '.limit // 0')
+        s_pct_int=$(printf "%.0f" "$s_pct")
+        s_bar=$(make_bar "$s_pct_int")
+        seg="${LABEL}usage/h${RESET} ${BLUE}${s_bar} ${s_pct_int}% ${s_label} ${DIM}(${s_used}/${s_limit})${RESET}"
+        segments+=("$seg")
+    elif [ -z "$provider_id" ] && [ -n "$daily_reset_str" ]; then
+        # Fallback — Anthropic direct mode (existing logic)
+        seg="${LABEL}usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET} ${DIM}(${daily_reset_str})${RESET}"
+        segments+=("$seg")
+    elif [ -z "$provider_id" ]; then
+        seg="${LABEL}usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET}"
+        if [ -n "$daily_reset_str" ]; then
+            if [ "$daily_reset_approx" = "1" ]; then
+                seg+=" ${DIM}(~${daily_reset_str})${RESET}"
+            else
+                seg+=" ${DIM}(${daily_reset_str})${RESET}"
+            fi
+        fi
+        segments+=("$seg")
     fi
-  fi
-  segments+=("$seg")
 fi
 
-# usage/w — 7d rate limit with optional reset time
-if [ "$(show_el weekly_limit)" = "1" ]; then
-  seg="${LABEL}usage/w${RESET} ${BLUE}${usage_7d_bar} ${usage_7d_int}%${RESET}"
-  if [ -n "$weekly_reset_str" ]; then
-    seg+=" ${DIM}(${weekly_reset_str})${RESET}"
-  fi
-  segments+=("$seg")
+# usage/d — long window
+show_long=$(show_el usage_long)
+[ -z "$show_long" ] && show_long=$(show_el weekly_limit)
+if [ "$show_long" = "1" ]; then
+    if [ -n "$usage_long_json" ]; then
+        l_label=$(echo "$usage_long_json" | "$JQ" -r '.label // "rpd"')
+        l_pct=$(echo "$usage_long_json" | "$JQ" -r '.pct // 0')
+        l_used=$(echo "$usage_long_json" | "$JQ" -r '.used // 0')
+        l_limit=$(echo "$usage_long_json" | "$JQ" -r '.limit // 0')
+        l_pct_int=$(printf "%.0f" "$l_pct")
+        l_bar=$(make_bar "$l_pct_int")
+        dim_suffix=""
+        [ "$stale" = "1" ] && dim_suffix="${DIM}"
+        seg="${dim_suffix}${LABEL}usage/d${RESET} ${BLUE}${l_bar} ${l_pct_int}% ${l_label} ${DIM}(${l_used}/${l_limit})${RESET}"
+        segments+=("$seg")
+    elif [ -z "$provider_id" ] && [ -n "$weekly_reset_str" ]; then
+        seg="${LABEL}usage/w${RESET} ${BLUE}${usage_7d_bar} ${usage_7d_int}%${RESET} ${DIM}(${weekly_reset_str})${RESET}"
+        segments+=("$seg")
+    elif [ -z "$provider_id" ]; then
+        seg="${LABEL}usage/w${RESET} ${BLUE}${usage_7d_bar} ${usage_7d_int}%${RESET}"
+        if [ -n "$weekly_reset_str" ]; then
+            seg+=" ${DIM}(${weekly_reset_str})${RESET}"
+        fi
+        segments+=("$seg")
+    fi
 fi
 
 # Token counter

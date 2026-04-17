@@ -1,0 +1,10 @@
+{
+  "provider": {"id": "openrouter", "icon": "\ud83d\udd35", "color": "blue", "display": "or"},
+  "model": {"id": "or-nvidia/nemotron-super:free", "display": "nemotron-super", "context_window": 128000},
+  "usage": {
+    "short": null,
+    "long": {"label": "req/day", "used": 25, "limit": 50, "pct": 50, "resets_at": null}
+  },
+  "generated_at": 1744810000,
+  "stale": false
+}
