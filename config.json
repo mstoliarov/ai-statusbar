@@ -1,0 +1,17 @@
+{
+  "workspace": true,
+  "model": true,
+  "provider_icon": true,
+  "context": true,
+  "extra_ctx": false,
+  "tokens": true,
+  "cost": true,
+  "usage_short": true,
+  "usage_long": true,
+  "requests": true,
+  "lines": true,
+  "claude_ram": true,
+  "ram": true,
+  "daily_limit": true,
+  "weekly_limit": true
+}
