@@ -7,15 +7,6 @@ export PATH="$HOME/bin:$PATH"
 JQ="$HOME/bin/jq"
 input=$(cat)
 
-# --- Model and Context Window Mapping ---
-get_default_ctx_size() {
-  local m="$1"
-  case "$m" in
-    *"gemma4:31b-cloud"*) echo 258000 ;;
-    *) echo 200000 ;;
-  esac
-}
-
 # ANSI colors
 RESET="\033[0m"
 BOLD="\033[1m"
@@ -80,7 +71,7 @@ eval "$("$JQ" -r '
   @sh "cwd=\(.workspace.current_dir // .cwd // "")",
   @sh "model=\(.model.display_name // "")",
   @sh "used_pct=\(.context_window.used_percentage // 0)",
-  @sh "ctx_size=\(.context_window.context_window_size // 0)",
+  @sh "ctx_size=\(.context_window.context_window_size // 200000)",
   @sh "tok_in=\(.context_window.total_input_tokens // 0)",
   @sh "tok_out=\(.context_window.total_output_tokens // 0)",
   @sh "usage_5h=\(.rate_limits.five_hour.used_percentage // 0)",
@@ -93,9 +84,6 @@ eval "$("$JQ" -r '
 ' <<< "$input")"
 
 # --- Detect Extra Usage and API mode ---
-# Override context size for specific models regardless of JSON value
-ctx_size=$(get_default_ctx_size "$model")
-
 # Extra Usage: context window expands to 1M tokens
 is_extra_usage=0
 [ "$ctx_size" -ge 1000000 ] && is_extra_usage=1
@@ -107,6 +95,40 @@ if [ -f "$CREDS" ]; then
   rate_tier=$("$JQ" -r '.claudeAiOauth.rateLimitTier // "default_claude_ai"' "$CREDS" 2>/dev/null)
   [ "$rate_tier" != "default_claude_ai" ] && [ "$rate_tier" != "" ] && is_api_mode=1
 fi
+
+# --- Provider state from proxy /status ---
+STATUS_URL="${CLAUDE_STATUS_URL:-http://127.0.0.1:11436/status}"
+provider_id=""
+provider_color_name=""
+provider_display=""
+ctx_size_override=""
+usage_short_json=""
+usage_long_json=""
+stale=0
+
+if command -v curl >/dev/null 2>&1; then
+  proxy_status=$(curl -s --max-time 0.3 "$STATUS_URL" 2>/dev/null)
+  if [ -n "$proxy_status" ] && echo "$proxy_status" | "$JQ" -e '.provider' >/dev/null 2>&1; then
+    eval "$(echo "$proxy_status" | "$JQ" -r '
+      @sh "provider_id=\(.provider.id // "")",
+      @sh "provider_color_name=\(.provider.color // "")",
+      @sh "provider_display=\(.provider.display // "")",
+      @sh "ctx_size_override=\(.model.context_window // "")",
+      @sh "_stale_str=\(.stale // false | tostring)"
+    ')"
+    [ "$_stale_str" = "true" ] && stale=1
+    usage_short_json=$(echo "$proxy_status" | "$JQ" -c '.usage.short // empty')
+    usage_long_json=$(echo "$proxy_status" | "$JQ" -c '.usage.long // empty')
+  fi
+fi
+
+# Override ctx_size only if proxy returned a positive integer
+if [[ "$ctx_size_override" =~ ^[0-9]+$ ]] && [ "$ctx_size_override" -gt 0 ]; then
+  ctx_size="$ctx_size_override"
+fi
+
+# now_epoch needed here for extra usage cache logic and later for rate limit reset times
+now_epoch=$(date +%s)
 
 # --- Extra Usage credit balance (GET /api/oauth/usage, cached 1h, background refresh) ---
 extra_balance_str=""
@@ -202,7 +224,7 @@ read_ram() {
       \$totalKB = \$os.TotalVisibleMemorySize
       \$freeKB = \$os.FreePhysicalMemory
       \$cMB = 0
-      \$cp = Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { \$_.CommandLine -match 'claude-code' } | Select-Object -First 1
+      \$cp = Get-CimInstance Win32_Process -Filter \"Name='claude.exe'\" | Where-Object { \$_.CommandLine -match 'claude-code' } | Select-Object -First 1
       if (\$cp) { try { \$cMB = [math]::Round((Get-Process -Id \$cp.ProcessId).WorkingSet64 / 1MB) } catch {} }
       \"\$totalKB \$freeKB \$cMB\"
     " 2>/dev/null | awk '{
@@ -232,7 +254,7 @@ read_ram() {
 # Use cache if fresh (< 30s), otherwise refresh
 use_cache=0
 if [ -f "$RAM_CACHE" ]; then
-  cache_age=$(( $(date +%s) - $(date -r "$RAM_CACHE" +%s 2>/dev/null || stat -c %Y "$RAM_CACHE" 2>/dev/null || echo 0) ))
+  cache_age=$(( now_epoch - $(date -r "$RAM_CACHE" +%s 2>/dev/null || stat -c %Y "$RAM_CACHE" 2>/dev/null || echo 0) ))
   [ "$cache_age" -lt 30 ] && use_cache=1
 fi
 
@@ -273,7 +295,6 @@ STATE="$HOME/.ai-statusbar/state.json"
 # --- Time until rate limit resets (resets_at is Unix epoch from statusLine JSON) ---
 daily_reset_str=""
 weekly_reset_str=""
-now_epoch=$(date +%s)
 
 if [ "$five_hour_resets_at" -gt 0 ] && [ "$usage_5h_int" -gt 0 ]; then
   secs_left=$(( five_hour_resets_at - now_epoch ))
@@ -330,62 +351,102 @@ if [ "$(show_el workspace)" = "1" ]; then
   segments+=("$seg")
 fi
 
-# Model
+# Map provider color name → ANSI escape
+provider_ansi() {
+  case "$1" in
+    orange) printf '\033[38;5;208m' ;;
+    white)  printf '\033[37m' ;;
+    cyan)   printf '\033[36m' ;;
+    blue)   printf '\033[34m' ;;
+    red)    printf '\033[31m' ;;
+    yellow) printf '\033[33m' ;;
+    *)      printf '\033[0m' ;;
+  esac
+}
+
+# Model — provider prefix + model name (no icons)
 if [ -n "$model_short" ] && [ "$(show_el model)" = "1" ]; then
-  segments+=("${MAGENTA}${model_short}${RESET}")
-fi
-
-
-# ctx — threshold colors; MAGENTA size when Extra Usage (ctx_size >= 1M)
-if [ "$(show_el context)" = "1" ]; then
-  if [ "$ctx_size" -ge 1000000 ]; then
-    segments+=("${LABEL}ctx${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}%${RESET} ${MAGENTA}/ ${ctx_size_fmt}${RESET}")
+  if [ -n "$provider_id" ]; then
+    pc=$(provider_ansi "$provider_color_name")
+    segments+=("${pc}${provider_display} | ${model_short}${RESET}")
   else
-    segments+=("${LABEL}ctx${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}% / ${ctx_size_fmt}${RESET}")
+    segments+=("${MAGENTA}ANT | ${model_short}${RESET}")
   fi
 fi
 
-# usage/d — 5h rate limit with optional reset time
-if [ "$(show_el daily_limit)" = "1" ]; then
-  seg="${LABEL}usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET}"
-  if [ -n "$daily_reset_str" ]; then
-    if [ "$daily_reset_approx" = "1" ]; then
-      seg+=" ${DIM}(~${daily_reset_str})${RESET}"
-    else
-      seg+=" ${DIM}(${daily_reset_str})${RESET}"
-    fi
+
+# CTX — threshold colors; MAGENTA size when Extra Usage (ctx_size >= 1M)
+if [ "$(show_el context)" = "1" ]; then
+  ctx_prefix="${LABEL}CTX${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}%"
+  if [ "$ctx_size" -ge 1000000 ]; then
+    segments+=("${ctx_prefix}${RESET} ${MAGENTA}/ ${ctx_size_fmt}${RESET}")
+  else
+    segments+=("${ctx_prefix} / ${ctx_size_fmt}${RESET}")
   fi
-  segments+=("$seg")
 fi
 
-# usage/w — 7d rate limit with optional reset time
-if [ "$(show_el weekly_limit)" = "1" ]; then
-  seg="${LABEL}usage/w${RESET} ${BLUE}${usage_7d_bar} ${usage_7d_int}%${RESET}"
-  if [ -n "$weekly_reset_str" ]; then
-    seg+=" ${DIM}(${weekly_reset_str})${RESET}"
+# Render one usage window segment.
+# Args: label json fallback_bar fallback_pct fallback_reset apply_stale_dim
+# - Prefers proxy json; falls back to Anthropic numbers only when provider is absent/anthropic.
+# - apply_stale_dim=1 wraps the whole segment in DIM when the proxy /status is stale.
+render_usage_window() {
+  local label="$1" json="$2"
+  local fb_bar="$3" fb_pct="$4" fb_reset="$5"
+  local apply_stale_dim="$6"
+  local u_pct u_used u_limit u_pct_int u_bar dim_prefix=""
+  if [ -n "$json" ]; then
+    eval "$(echo "$json" | "$JQ" -r '
+      @sh "u_pct=\(.pct // 0)",
+      @sh "u_used=\(.used // 0)",
+      @sh "u_limit=\(.limit // 0)"
+    ')"
+    u_pct_int=$(printf "%.0f" "$u_pct")
+    u_bar=$(make_bar "$u_pct_int")
+    [ "$apply_stale_dim" = "1" ] && [ "$stale" = "1" ] && dim_prefix="${DIM}"
+    segments+=("${dim_prefix}${LABEL}${label}${RESET} ${BLUE}${u_bar} ${u_pct_int}%${RESET} ${DIM}($(fmt_num "$u_used")/$(fmt_num "$u_limit"))${RESET}")
+  elif [ -z "$provider_id" ] || [ "$provider_id" = "anthropic" ]; then
+    local seg="${LABEL}${label}${RESET} ${BLUE}${fb_bar} ${fb_pct}%${RESET}"
+    [ -n "$fb_reset" ] && seg+=" ${DIM}(${fb_reset})${RESET}"
+    segments+=("$seg")
   fi
-  segments+=("$seg")
+}
+
+# Usage/d — short window (from /status when available, else Anthropic 5h fallback)
+show_short=$(show_el usage_short)
+[ -z "$show_short" ] && show_short=$(show_el daily_limit)  # backward compat
+if [ "$show_short" = "1" ]; then
+  render_usage_window "Usage/d" "$usage_short_json" \
+    "$usage_5h_bar" "$usage_5h_int" "$daily_reset_str" 0
+fi
+
+# Usage/w — long window
+show_long=$(show_el usage_long)
+[ -z "$show_long" ] && show_long=$(show_el weekly_limit)
+if [ "$show_long" = "1" ]; then
+  render_usage_window "Usage/w" "$usage_long_json" \
+    "$usage_7d_bar" "$usage_7d_int" "$weekly_reset_str" 1
 fi
 
 # Token counter
 if [ "$(show_el tokens)" = "1" ]; then
-  segments+=("${LABEL}tok${RESET} ${GREEN}${tok_in_fmt}${RESET}${DIM}/${RESET}${RED}${tok_out_fmt}${RESET}")
+  segments+=("${LABEL}Tok${RESET} ${GREEN}${tok_in_fmt}${RESET}${DIM}/${RESET}${RED}${tok_out_fmt}${RESET}")
 fi
 
-# Cost — auto-shown for Extra Usage and API mode (overrides config); config controls normal visibility
-if [ "$is_extra_usage" = "1" ] || [ "$is_api_mode" = "1" ] || [ "$(show_el cost)" = "1" ]; then
-  if [ -n "$extra_balance_str" ]; then
+# Cost / Extra Usage balance
+_show_cost=$(show_el cost)
+_show_extra_ctx=$(show_el extra_ctx)
+if [ "$is_api_mode" = "1" ] || [ "$_show_cost" = "1" ] || [ "$_show_extra_ctx" = "1" ]; then
+  if [ -n "$extra_balance_str" ] && [ "$_show_extra_ctx" = "1" ]; then
     # Extra Usage subscription: show credit balance (spent/total) in magenta
     segments+=("${MAGENTA}${extra_balance_str}${RESET}")
-  else
-    # Normal or API: show session cost
-    segments+=("${LABEL}\$${cost_fmt}${RESET}")
+  elif [ "$is_api_mode" = "1" ] || [ "$_show_cost" = "1" ]; then
+    segments+=("${LABEL}Cost \$${cost_fmt}${RESET}")
   fi
 fi
 
 # Requests counter
 if [ "$(show_el requests)" = "1" ]; then
-  segments+=("${BLUE}🔧 ${requests} req${RESET}")
+  segments+=("${BLUE}🔧 ${requests} Req${RESET}")
 fi
 
 # Lines added/removed
@@ -395,12 +456,12 @@ fi
 
 # Claude process RAM
 if [ "$(show_el claude_ram)" = "1" ] && [ "$claude_ram_mb" -gt 0 ]; then
-  segments+=("${ram_color}mem: ${claude_ram_mb} MB${RESET}")
+  segments+=("${ram_color}MEM ${claude_ram_mb} MB${RESET}")
 fi
 
 # System RAM
 if [ "$(show_el ram)" = "1" ] && [ "$ram_pct" -gt 0 ]; then
-  segments+=("${LABEL}ram${RESET} ${ram_color}${ram_bar} ${ram_used_gb}/${ram_total_gb}G${RESET}")
+  segments+=("${LABEL}RAM${RESET} ${ram_color}${ram_bar} ${ram_used_gb}/${ram_total_gb}G${RESET}")
 fi
 
 # Join segments with separator (no trailing │)
