@@ -48,6 +48,101 @@ else
 fi
 teardown_fixture
 
+# ---------- Helper: build state.json with rate_limits ----------
+write_state() {
+  local s_pct=$1 s_rst=$2 w_pct=$3 w_rst=$4 s_fired=${5:-0} w_fired=${6:-0}
+  "$JQ" -n \
+    --argjson sp "$s_pct" --argjson sr "$s_rst" \
+    --argjson wp "$w_pct" --argjson wr "$w_rst" \
+    --argjson sf "$s_fired" --argjson wf "$w_fired" \
+    '{tokens:{input:0,output:0},usage:{},requests_count:0,lines_count:0,
+      rate_limits:{session:{pct:$sp,resets_at:$sr},weekly:{pct:$wp,resets_at:$wr}},
+      autosave:{session_fired_for:$sf,weekly_fired_for:$wf}}' \
+    > "$HOME/.ai-statusbar/state.json"
+}
+
+run_stop() {
+  local stop_active=${1:-false}
+  echo "{\"stop_hook_active\":$stop_active,\"model\":\"claude-opus-4-7\"}" \
+    | bash "$STOP_HOOK"
+}
+
+# ---------- Test 2: session >= 95% triggers block ----------
+echo "Test 2: session 96% triggers decision=block"
+setup_fixture
+write_state 96 111111 30 222222
+OUT=$(run_stop false)
+if echo "$OUT" | "$JQ" -e '.decision == "block"' >/dev/null 2>&1 \
+   && echo "$OUT" | "$JQ" -r '.reason' | grep -qi "session 96%"; then
+  pass "session trigger fires with correct reason"
+else
+  fail "expected decision=block with 'session 96%' in reason, got: $OUT"
+fi
+teardown_fixture
+
+# ---------- Test 3: weekly >= 99% triggers block ----------
+echo "Test 3: weekly 99% triggers decision=block"
+setup_fixture
+write_state 10 111111 99 222222
+OUT=$(run_stop false)
+if echo "$OUT" | "$JQ" -e '.decision == "block"' >/dev/null 2>&1 \
+   && echo "$OUT" | "$JQ" -r '.reason' | grep -qi "weekly 99%"; then
+  pass "weekly trigger fires with correct reason"
+else
+  fail "expected decision=block with 'weekly 99%' in reason, got: $OUT"
+fi
+teardown_fixture
+
+# ---------- Test 4: already fired for this reset window → no block ----------
+echo "Test 4: fired_for == resets_at → skip"
+setup_fixture
+write_state 96 111111 30 222222 111111 0
+OUT=$(run_stop false)
+if [ -z "$OUT" ] || ! echo "$OUT" | "$JQ" -e '.decision' >/dev/null 2>&1; then
+  pass "skipped because already fired for this window"
+else
+  fail "expected empty stdout, got: $OUT"
+fi
+teardown_fixture
+
+# ---------- Test 5: stop_hook_active=true → no block ----------
+echo "Test 5: stop_hook_active=true → skip"
+setup_fixture
+write_state 96 111111 99 222222
+OUT=$(run_stop true)
+if [ -z "$OUT" ] || ! echo "$OUT" | "$JQ" -e '.decision' >/dev/null 2>&1; then
+  pass "skipped because stop_hook_active is true"
+else
+  fail "expected empty stdout, got: $OUT"
+fi
+teardown_fixture
+
+# ---------- Test 6: both thresholds reached → both mentioned in reason ----------
+echo "Test 6: session 96% AND weekly 99% → both in reason"
+setup_fixture
+write_state 96 111111 99 222222
+OUT=$(run_stop false)
+if echo "$OUT" | "$JQ" -e '.decision == "block"' >/dev/null 2>&1 \
+   && echo "$OUT" | "$JQ" -r '.reason' | grep -qi "session 96%" \
+   && echo "$OUT" | "$JQ" -r '.reason' | grep -qi "weekly 99%"; then
+  pass "both triggers mentioned"
+else
+  fail "expected both 'session 96%' and 'weekly 99%' in reason, got: $OUT"
+fi
+teardown_fixture
+
+# ---------- Test 7: below thresholds → no block ----------
+echo "Test 7: session 50%, weekly 50% → no block"
+setup_fixture
+write_state 50 111111 50 222222
+OUT=$(run_stop false)
+if [ -z "$OUT" ] || ! echo "$OUT" | "$JQ" -e '.decision' >/dev/null 2>&1; then
+  pass "skipped because below thresholds"
+else
+  fail "expected empty stdout, got: $OUT"
+fi
+teardown_fixture
+
 echo ""
 echo "Summary: $PASSED passed, $FAILED failed"
 [ "$FAILED" -eq 0 ] || exit 1
