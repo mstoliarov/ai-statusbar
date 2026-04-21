@@ -27,6 +27,37 @@ fi
 
 TOTAL_TOKENS=$(( TOKENS_IN + TOKENS_OUT ))
 
+# --- AutoSave trigger: session ≥95% OR weekly ≥99% ---
+STOP_HOOK_ACTIVE=$(echo "$INPUT" | "$JQ" -r '.stop_hook_active // false')
+
+if [[ "$STOP_HOOK_ACTIVE" != "true" && -f "$STATE" ]]; then
+  S_PCT=$("$JQ" -r '.rate_limits.session.pct // 0' "$STATE")
+  W_PCT=$("$JQ" -r '.rate_limits.weekly.pct // 0' "$STATE")
+  S_RESET=$("$JQ" -r '.rate_limits.session.resets_at // 0' "$STATE")
+  W_RESET=$("$JQ" -r '.rate_limits.weekly.resets_at // 0' "$STATE")
+  S_FIRED=$("$JQ" -r '.autosave.session_fired_for // 0' "$STATE")
+  W_FIRED=$("$JQ" -r '.autosave.weekly_fired_for // 0' "$STATE")
+
+  REASONS=()
+  if [ "${S_PCT:-0}" -ge 95 ] && [ "$S_FIRED" != "$S_RESET" ]; then
+    REASONS+=("session ${S_PCT}%")
+    "$JQ" --argjson r "$S_RESET" '.autosave.session_fired_for = $r' \
+      "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
+  fi
+  if [ "${W_PCT:-0}" -ge 99 ] && [ "$W_FIRED" != "$W_RESET" ]; then
+    REASONS+=("weekly ${W_PCT}%")
+    "$JQ" --argjson r "$W_RESET" '.autosave.weekly_fired_for = $r' \
+      "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
+  fi
+
+  if [ "${#REASONS[@]}" -gt 0 ]; then
+    REASON_TXT="AutoSave: порог достигнут ($(IFS=', '; echo "${REASONS[*]}")). Выполни /saveplan, затем /closeday, затем заверши."
+    "$JQ" -n --arg r "$REASON_TXT" '{decision:"block", reason:$r}'
+    exit 0
+  fi
+fi
+# --- end AutoSave ---
+
 # Dynamic pricing by model (Anthropic pricing, $/1M tokens input/output)
 get_model_pricing() {
   local m="$1"
