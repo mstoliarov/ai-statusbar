@@ -11,6 +11,11 @@ INPUT=$(cat)
 # Extract model from Stop hook payload
 MODEL=$(echo "$INPUT" | "$JQ" -r '.model // ""')
 
+# Ensure state file exists to avoid jq errors
+if [ ! -f "$STATE" ]; then
+echo '{}' > "$STATE"
+fi
+
 # Token counts — read from state.json (saved by statusline.sh from live JSON, more reliable than Stop payload)
 TOKENS_IN=$("$JQ" -r '.tokens.input // 0' "$STATE" 2>/dev/null || echo 0)
 TOKENS_OUT=$("$JQ" -r '.tokens.output // 0' "$STATE" 2>/dev/null || echo 0)
