@@ -11,9 +11,14 @@ INPUT=$(cat)
 # Extract model from Stop hook payload
 MODEL=$(echo "$INPUT" | "$JQ" -r '.model // ""')
 
+# Ensure state file exists to avoid jq errors
+if [ ! -f "$STATE" ]; then
+echo '{}' > "$STATE"
+fi
+
 # Token counts — read from state.json (saved by statusline.sh from live JSON, more reliable than Stop payload)
-TOKENS_IN=$("$JQ" -r '.tokens.input // 0' "$STATE")
-TOKENS_OUT=$("$JQ" -r '.tokens.output // 0' "$STATE")
+TOKENS_IN=$("$JQ" -r '.tokens.input // 0' "$STATE" 2>/dev/null || echo 0)
+TOKENS_OUT=$("$JQ" -r '.tokens.output // 0' "$STATE" 2>/dev/null || echo 0)
 TOKENS_IN=${TOKENS_IN:-0}
 TOKENS_OUT=${TOKENS_OUT:-0}
 
@@ -27,8 +32,53 @@ fi
 
 TOTAL_TOKENS=$(( TOKENS_IN + TOKENS_OUT ))
 
-# Cost estimate: claude-sonnet pricing ~$3/$15 per 1M tokens
-COST=$(awk "BEGIN { printf \"%.6f\", ($TOKENS_IN * 3 + $TOKENS_OUT * 15) / 1000000 }")
+# --- AutoSave trigger: session ≥95% OR weekly ≥99% ---
+STOP_HOOK_ACTIVE=$(echo "$INPUT" | "$JQ" -r '.stop_hook_active // false')
+
+if [[ "$STOP_HOOK_ACTIVE" != "true" && -f "$STATE" ]]; then
+  S_PCT=$("$JQ" -r '.rate_limits.session.pct // 0' "$STATE")
+  W_PCT=$("$JQ" -r '.rate_limits.weekly.pct // 0' "$STATE")
+  S_RESET=$("$JQ" -r '.rate_limits.session.resets_at // 0' "$STATE")
+  W_RESET=$("$JQ" -r '.rate_limits.weekly.resets_at // 0' "$STATE")
+  S_FIRED=$("$JQ" -r '.autosave.session_fired_for // 0' "$STATE")
+  W_FIRED=$("$JQ" -r '.autosave.weekly_fired_for // 0' "$STATE")
+
+  REASONS=()
+  if [ "${S_PCT:-0}" -ge 95 ] && [ "$S_FIRED" != "$S_RESET" ]; then
+    REASONS+=("session ${S_PCT}%")
+    "$JQ" --argjson r "$S_RESET" '.autosave.session_fired_for = $r' \
+      "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
+  fi
+  if [ "${W_PCT:-0}" -ge 99 ] && [ "$W_FIRED" != "$W_RESET" ]; then
+    REASONS+=("weekly ${W_PCT}%")
+    "$JQ" --argjson r "$W_RESET" '.autosave.weekly_fired_for = $r' \
+      "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
+  fi
+
+  if [ "${#REASONS[@]}" -gt 0 ]; then
+    REASON_TXT="AutoSave: порог достигнут ($(IFS=', '; echo "${REASONS[*]}")). Выполни /saveplan, затем /closeday, затем заверши."
+    "$JQ" -n --arg r "$REASON_TXT" '{decision:"block", reason:$r}'
+    exit 0
+  fi
+fi
+# --- end AutoSave ---
+
+# Dynamic pricing by model (Anthropic pricing, $/1M tokens input/output)
+get_model_pricing() {
+  local m="$1"
+  case "$m" in
+    claude-opus-4*)                      echo "15 75" ;;
+    claude-sonnet-4*|claude-sonnet-3-7*) echo "3 15" ;;
+    claude-haiku-4*|claude-haiku-3-5*)   echo "0.8 4" ;;
+    claude-opus-3*)                      echo "15 75" ;;
+    claude-sonnet-3*)                    echo "3 15" ;;
+    claude-haiku-3*)                     echo "0.25 1.25" ;;
+    *)                                   echo "0 0" ;;  # Ollama / local — free
+  esac
+}
+
+read PRICE_IN PRICE_OUT <<< "$(get_model_pricing "$MODEL")"
+COST=$(awk "BEGIN { printf \"%.6f\", ($TOKENS_IN * $PRICE_IN + $TOKENS_OUT * $PRICE_OUT) / 1000000 }")
 
 # Context window % — sonnet context = 200k tokens
 CONTEXT_TOTAL=200000
@@ -44,7 +94,7 @@ STORED_WEEK_START=$("$JQ" -r '.usage.week_start // ""' "$STATE")
 
 # If same day → add tokens; otherwise reset daily counter
 if [[ "$STORED_TODAY" == "$TODAY" ]]; then
-  TODAY_TOKENS=$("$JQ" -r ".usage.today_tokens // 0" "$STATE")
+  TODAY_TOKENS=$("$JQ" -r ".usage.today_tokens // 0" "$STATE" 2>/dev/null || echo 0)
   TODAY_TOKENS=$(( TODAY_TOKENS + TOTAL_TOKENS ))
 else
   TODAY_TOKENS=$TOTAL_TOKENS
@@ -52,7 +102,7 @@ fi
 
 # If same week → add tokens; otherwise reset weekly counter
 if [[ "$STORED_WEEK_START" == "$WEEK_START" ]]; then
-  WEEK_TOKENS=$("$JQ" -r ".usage.week_tokens // 0" "$STATE")
+  WEEK_TOKENS=$("$JQ" -r ".usage.week_tokens // 0" "$STATE" 2>/dev/null || echo 0)
   WEEK_TOKENS=$(( WEEK_TOKENS + TOTAL_TOKENS ))
 else
   WEEK_TOKENS=$TOTAL_TOKENS
@@ -62,16 +112,16 @@ NOW_ISO=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
 # Update state (no counter reset — counters persist per Claude process via PPID in post-tool.sh)
 "$JQ" \
-  --argjson ti "$TOKENS_IN" \
-  --argjson to "$TOKENS_OUT" \
-  --argjson cost "$COST" \
-  --argjson ctx "$CTX_PCT" \
+  --argjson ti "${TOKENS_IN:-0}" \
+  --argjson to "${TOKENS_OUT:-0}" \
+  --argjson cost "${COST:-0}" \
+  --argjson ctx "${CTX_PCT:-0}" \
   --arg model "$MODEL" \
   --arg dir "$(pwd)" \
   --arg today "$TODAY" \
-  --argjson today_tok "$TODAY_TOKENS" \
+  --argjson today_tok "${TODAY_TOKENS:-0}" \
   --arg week_start "$WEEK_START" \
-  --argjson week_tok "$WEEK_TOKENS" \
+  --argjson week_tok "${WEEK_TOKENS:-0}" \
   --arg now_iso "$NOW_ISO" \
   '.tokens.input = $ti |
    .tokens.output = $to |

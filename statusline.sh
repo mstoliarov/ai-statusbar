@@ -107,24 +107,24 @@ usage_long_json=""
 stale=0
 
 if command -v curl >/dev/null 2>&1; then
-    proxy_status=$(curl -s --max-time 0.3 "$STATUS_URL" 2>/dev/null)
-    if [ -n "$proxy_status" ] && echo "$proxy_status" | "$JQ" -e '.provider' >/dev/null 2>&1; then
-        eval "$(echo "$proxy_status" | "$JQ" -r '
-            @sh "provider_id=\(.provider.id // "")",
-            @sh "provider_color_name=\(.provider.color // "")",
-            @sh "provider_display=\(.provider.display // "")",
-            @sh "ctx_size_override=\(.model.context_window // "")",
-            @sh "_stale_str=\(.stale // false | tostring)"
-        ')"
-        [ "$_stale_str" = "true" ] && stale=1
-        usage_short_json=$(echo "$proxy_status" | "$JQ" -c '.usage.short // empty')
-        usage_long_json=$(echo "$proxy_status" | "$JQ" -c '.usage.long // empty')
-    fi
+  proxy_status=$(curl -s --max-time 0.3 "$STATUS_URL" 2>/dev/null)
+  if [ -n "$proxy_status" ] && echo "$proxy_status" | "$JQ" -e '.provider' >/dev/null 2>&1; then
+    eval "$(echo "$proxy_status" | "$JQ" -r '
+      @sh "provider_id=\(.provider.id // "")",
+      @sh "provider_color_name=\(.provider.color // "")",
+      @sh "provider_display=\(.provider.display // "")",
+      @sh "ctx_size_override=\(.model.context_window // "")",
+      @sh "_stale_str=\(.stale // false | tostring)"
+    ')"
+    [ "$_stale_str" = "true" ] && stale=1
+    usage_short_json=$(echo "$proxy_status" | "$JQ" -c '.usage.short // empty')
+    usage_long_json=$(echo "$proxy_status" | "$JQ" -c '.usage.long // empty')
+  fi
 fi
 
-# Override ctx_size if proxy returned a real context window
-if [ -n "$ctx_size_override" ] && [ "$ctx_size_override" != "null" ]; then
-    ctx_size="$ctx_size_override"
+# Override ctx_size only if proxy returned a positive integer
+if [[ "$ctx_size_override" =~ ^[0-9]+$ ]] && [ "$ctx_size_override" -gt 0 ]; then
+  ctx_size="$ctx_size_override"
 fi
 
 # now_epoch needed here for extra usage cache logic and later for rate limit reset times
@@ -224,7 +224,7 @@ read_ram() {
       \$totalKB = \$os.TotalVisibleMemorySize
       \$freeKB = \$os.FreePhysicalMemory
       \$cMB = 0
-      \$cp = Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { \$_.CommandLine -match 'claude-code' } | Select-Object -First 1
+      \$cp = Get-CimInstance Win32_Process -Filter \"Name='claude.exe'\" | Where-Object { \$_.CommandLine -match 'claude-code' } | Select-Object -First 1
       if (\$cp) { try { \$cMB = [math]::Round((Get-Process -Id \$cp.ProcessId).WorkingSet64 / 1MB) } catch {} }
       \"\$totalKB \$freeKB \$cMB\"
     " 2>/dev/null | awk '{
@@ -338,6 +338,15 @@ if [ "$tok_total" -gt 0 ] && [ -f "$STATE" ]; then
     "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
 fi
 
+# Save rate_limits snapshot for stop.sh autosave trigger
+if [ -f "$STATE" ]; then
+  "$JQ" --argjson sp "$usage_5h_int" --argjson sr "$five_hour_resets_at" \
+        --argjson wp "$usage_7d_int" --argjson wr "$seven_day_resets_at" \
+        '.rate_limits.session = {pct: $sp, resets_at: $sr} |
+         .rate_limits.weekly  = {pct: $wp, resets_at: $wr}' \
+        "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
+fi
+
 # --- Build output ---
 SEP="${DIM} │ ${RESET}"
 segments=()
@@ -353,79 +362,78 @@ fi
 
 # Map provider color name → ANSI escape
 provider_ansi() {
-    case "$1" in
-        orange) printf '\033[38;5;208m' ;;
-        white)  printf '\033[37m' ;;
-        cyan)   printf '\033[36m' ;;
-        blue)   printf '\033[34m' ;;
-        red)    printf '\033[31m' ;;
-        yellow) printf '\033[33m' ;;
-        *)      printf '\033[0m' ;;
-    esac
+  case "$1" in
+    orange) printf '\033[38;5;208m' ;;
+    white)  printf '\033[37m' ;;
+    cyan)   printf '\033[36m' ;;
+    blue)   printf '\033[34m' ;;
+    red)    printf '\033[31m' ;;
+    yellow) printf '\033[33m' ;;
+    *)      printf '\033[0m' ;;
+  esac
 }
 
 # Model — provider prefix + model name (no icons)
 if [ -n "$model_short" ] && [ "$(show_el model)" = "1" ]; then
-    if [ -n "$provider_id" ]; then
-        pc=$(provider_ansi "$provider_color_name")
-        segments+=("${pc}${provider_display} | ${model_short}${RESET}")
-    else
-        segments+=("${MAGENTA}ANT | ${model_short}${RESET}")
-    fi
+  if [ -n "$provider_id" ]; then
+    pc=$(provider_ansi "$provider_color_name")
+    segments+=("${pc}${provider_display} | ${model_short}${RESET}")
+  else
+    segments+=("${MAGENTA}ANT | ${model_short}${RESET}")
+  fi
 fi
 
 
 # CTX — threshold colors; MAGENTA size when Extra Usage (ctx_size >= 1M)
 if [ "$(show_el context)" = "1" ]; then
+  ctx_prefix="${LABEL}CTX${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}%"
   if [ "$ctx_size" -ge 1000000 ]; then
-    segments+=("${LABEL}CTX${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}%${RESET} ${MAGENTA}/ ${ctx_size_fmt}${RESET}")
+    segments+=("${ctx_prefix}${RESET} ${MAGENTA}/ ${ctx_size_fmt}${RESET}")
   else
-    segments+=("${LABEL}CTX${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}% / ${ctx_size_fmt}${RESET}")
+    segments+=("${ctx_prefix} / ${ctx_size_fmt}${RESET}")
   fi
 fi
+
+# Render one usage window segment.
+# Args: label json fallback_bar fallback_pct fallback_reset apply_stale_dim
+# - Prefers proxy json; falls back to Anthropic numbers only when provider is absent/anthropic.
+# - apply_stale_dim=1 wraps the whole segment in DIM when the proxy /status is stale.
+render_usage_window() {
+  local label="$1" json="$2"
+  local fb_bar="$3" fb_pct="$4" fb_reset="$5"
+  local apply_stale_dim="$6"
+  local u_pct u_used u_limit u_pct_int u_bar dim_prefix=""
+  if [ -n "$json" ]; then
+    eval "$(echo "$json" | "$JQ" -r '
+      @sh "u_pct=\(.pct // 0)",
+      @sh "u_used=\(.used // 0)",
+      @sh "u_limit=\(.limit // 0)"
+    ')"
+    u_pct_int=$(printf "%.0f" "$u_pct")
+    u_bar=$(make_bar "$u_pct_int")
+    [ "$apply_stale_dim" = "1" ] && [ "$stale" = "1" ] && dim_prefix="${DIM}"
+    segments+=("${dim_prefix}${LABEL}${label}${RESET} ${BLUE}${u_bar} ${u_pct_int}%${RESET} ${DIM}($(fmt_num "$u_used")/$(fmt_num "$u_limit"))${RESET}")
+  elif [ -z "$provider_id" ] || [ "$provider_id" = "anthropic" ]; then
+    local seg="${LABEL}${label}${RESET} ${BLUE}${fb_bar} ${fb_pct}%${RESET}"
+    [ -n "$fb_reset" ] && seg+=" ${DIM}(${fb_reset})${RESET}"
+    segments+=("$seg")
+  fi
+}
 
 # Usage/d — short window (from /status when available, else Anthropic 5h fallback)
 show_short=$(show_el usage_short)
 [ -z "$show_short" ] && show_short=$(show_el daily_limit)  # backward compat
 if [ "$show_short" = "1" ]; then
-    if [ -n "$usage_short_json" ]; then
-        eval "$(echo "$usage_short_json" | "$JQ" -r '
-            @sh "s_pct=\(.pct // 0)",
-            @sh "s_used=\(.used // 0)",
-            @sh "s_limit=\(.limit // 0)"
-        ')"
-        s_pct_int=$(printf "%.0f" "$s_pct")
-        s_bar=$(make_bar "$s_pct_int")
-        seg="${LABEL}Usage/d${RESET} ${BLUE}${s_bar} ${s_pct_int}%${RESET} ${DIM}(${s_used}/${s_limit})${RESET}"
-        segments+=("$seg")
-    elif [ -z "$provider_id" ] || [ "$provider_id" = "anthropic" ]; then
-        seg="${LABEL}Usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET}"
-        [ -n "$daily_reset_str" ] && seg+=" ${DIM}(${daily_reset_str})${RESET}"
-        segments+=("$seg")
-    fi
+  render_usage_window "Usage/d" "$usage_short_json" \
+    "$usage_5h_bar" "$usage_5h_int" "$daily_reset_str" 0
 fi
 
-# Usage/W — long window
+# Usage/w — long window
 show_long=$(show_el usage_long)
 [ -z "$show_long" ] && show_long=$(show_el weekly_limit)
 if [ "$show_long" = "1" ]; then
-    if [ -n "$usage_long_json" ]; then
-        eval "$(echo "$usage_long_json" | "$JQ" -r '
-            @sh "l_pct=\(.pct // 0)",
-            @sh "l_used=\(.used // 0)",
-            @sh "l_limit=\(.limit // 0)"
-        ')"
-        l_pct_int=$(printf "%.0f" "$l_pct")
-        l_bar=$(make_bar "$l_pct_int")
-        dim_suffix=""
-        [ "$stale" = "1" ] && dim_suffix="${DIM}"
-        seg="${dim_suffix}${LABEL}Usage/W${RESET} ${BLUE}${l_bar} ${l_pct_int}%${RESET} ${DIM}(${l_used}/${l_limit})${RESET}"
-        segments+=("$seg")
-    elif [ -z "$provider_id" ] || [ "$provider_id" = "anthropic" ]; then
-        seg="${LABEL}Usage/W${RESET} ${BLUE}${usage_7d_bar} ${usage_7d_int}%${RESET}"
-        [ -n "$weekly_reset_str" ] && seg+=" ${DIM}(${weekly_reset_str})${RESET}"
-        segments+=("$seg")
-    fi
+  render_usage_window "Usage/w" "$usage_long_json" \
+    "$usage_7d_bar" "$usage_7d_int" "$weekly_reset_str" 1
 fi
 
 # Token counter

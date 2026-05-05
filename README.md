@@ -196,6 +196,16 @@ Claude Code
 | `config.json` | Element visibility config (gitignored) |
 | `state.json` | Session state (gitignored) |
 
+## AutoSave on usage limits
+
+Stop hook автоматически триггерит сохранение, когда:
+- **session ≥ 95%** (5-часовое окно), или
+- **weekly ≥ 99%**
+
+При срабатывании Claude получает инструкцию выполнить `/saveplan` и `/closeday`, затем завершается. Anti-loop: один выстрел на окно через `autosave.session_fired_for == rate_limits.session.resets_at`.
+
+Пороги зашиты в `hooks/stop.sh` (константы 95 и 99). Регрессия покрыта `test/test-autosave.sh`.
+
 ## License
 
 MIT
