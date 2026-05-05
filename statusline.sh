@@ -99,7 +99,6 @@ fi
 # --- Provider state from proxy /status ---
 STATUS_URL="${CLAUDE_STATUS_URL:-http://127.0.0.1:11436/status}"
 provider_id=""
-provider_icon=""
 provider_color_name=""
 provider_display=""
 ctx_size_override=""
@@ -110,14 +109,16 @@ stale=0
 if command -v curl >/dev/null 2>&1; then
     proxy_status=$(curl -s --max-time 0.3 "$STATUS_URL" 2>/dev/null)
     if [ -n "$proxy_status" ] && echo "$proxy_status" | "$JQ" -e '.provider' >/dev/null 2>&1; then
-        provider_id=$(echo "$proxy_status" | "$JQ" -r '.provider.id // ""')
-        provider_icon=$(echo "$proxy_status" | "$JQ" -r '.provider.icon // ""')
-        provider_color_name=$(echo "$proxy_status" | "$JQ" -r '.provider.color // ""')
-        provider_display=$(echo "$proxy_status" | "$JQ" -r '.provider.display // ""')
-        ctx_size_override=$(echo "$proxy_status" | "$JQ" -r '.model.context_window // empty')
+        eval "$(echo "$proxy_status" | "$JQ" -r '
+            @sh "provider_id=\(.provider.id // "")",
+            @sh "provider_color_name=\(.provider.color // "")",
+            @sh "provider_display=\(.provider.display // "")",
+            @sh "ctx_size_override=\(.model.context_window // "")",
+            @sh "_stale_str=\(.stale // false | tostring)"
+        ')"
+        [ "$_stale_str" = "true" ] && stale=1
         usage_short_json=$(echo "$proxy_status" | "$JQ" -c '.usage.short // empty')
         usage_long_json=$(echo "$proxy_status" | "$JQ" -c '.usage.long // empty')
-        [ "$(echo "$proxy_status" | "$JQ" -r '.stale // false')" = "true" ] && stale=1
     fi
 fi
 
@@ -125,6 +126,9 @@ fi
 if [ -n "$ctx_size_override" ] && [ "$ctx_size_override" != "null" ]; then
     ctx_size="$ctx_size_override"
 fi
+
+# now_epoch needed here for extra usage cache logic and later for rate limit reset times
+now_epoch=$(date +%s)
 
 # --- Extra Usage credit balance (GET /api/oauth/usage, cached 1h, background refresh) ---
 extra_balance_str=""
@@ -250,7 +254,7 @@ read_ram() {
 # Use cache if fresh (< 30s), otherwise refresh
 use_cache=0
 if [ -f "$RAM_CACHE" ]; then
-  cache_age=$(( $(date +%s) - $(date -r "$RAM_CACHE" +%s 2>/dev/null || stat -c %Y "$RAM_CACHE" 2>/dev/null || echo 0) ))
+  cache_age=$(( now_epoch - $(date -r "$RAM_CACHE" +%s 2>/dev/null || stat -c %Y "$RAM_CACHE" 2>/dev/null || echo 0) ))
   [ "$cache_age" -lt 30 ] && use_cache=1
 fi
 
@@ -291,7 +295,6 @@ STATE="$HOME/.ai-statusbar/state.json"
 # --- Time until rate limit resets (resets_at is Unix epoch from statusLine JSON) ---
 daily_reset_str=""
 weekly_reset_str=""
-now_epoch=$(date +%s)
 
 if [ "$five_hour_resets_at" -gt 0 ] && [ "$usage_5h_int" -gt 0 ]; then
   secs_left=$(( five_hour_resets_at - now_epoch ))
@@ -361,106 +364,90 @@ provider_ansi() {
     esac
 }
 
-# Model — with provider icon + color if known
+# Model — provider prefix + model name (no icons)
 if [ -n "$model_short" ] && [ "$(show_el model)" = "1" ]; then
     if [ -n "$provider_id" ]; then
         pc=$(provider_ansi "$provider_color_name")
-        prefix=""
-        if [ "$(show_el provider_icon)" != "0" ]; then
-            prefix="${provider_icon}${provider_display} "
-        fi
-        segments+=("${pc}${prefix}${model_short}${RESET}")
+        segments+=("${pc}${provider_display} | ${model_short}${RESET}")
     else
-        segments+=("${MAGENTA}${model_short}${RESET}")
+        segments+=("${MAGENTA}ANT | ${model_short}${RESET}")
     fi
 fi
 
 
-# ctx — threshold colors; MAGENTA size when Extra Usage (ctx_size >= 1M)
+# CTX — threshold colors; MAGENTA size when Extra Usage (ctx_size >= 1M)
 if [ "$(show_el context)" = "1" ]; then
   if [ "$ctx_size" -ge 1000000 ]; then
-    segments+=("${LABEL}ctx${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}%${RESET} ${MAGENTA}/ ${ctx_size_fmt}${RESET}")
+    segments+=("${LABEL}CTX${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}%${RESET} ${MAGENTA}/ ${ctx_size_fmt}${RESET}")
   else
-    segments+=("${LABEL}ctx${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}% / ${ctx_size_fmt}${RESET}")
+    segments+=("${LABEL}CTX${RESET} ${ctx_color}${ctx_bar} ${used_pct_int}% / ${ctx_size_fmt}${RESET}")
   fi
 fi
 
-# usage/h — short window (from /status when available, else Anthropic 5h fallback)
+# Usage/d — short window (from /status when available, else Anthropic 5h fallback)
 show_short=$(show_el usage_short)
 [ -z "$show_short" ] && show_short=$(show_el daily_limit)  # backward compat
 if [ "$show_short" = "1" ]; then
     if [ -n "$usage_short_json" ]; then
-        s_label=$(echo "$usage_short_json" | "$JQ" -r '.label // "rpm"')
-        s_pct=$(echo "$usage_short_json" | "$JQ" -r '.pct // 0')
-        s_used=$(echo "$usage_short_json" | "$JQ" -r '.used // 0')
-        s_limit=$(echo "$usage_short_json" | "$JQ" -r '.limit // 0')
+        eval "$(echo "$usage_short_json" | "$JQ" -r '
+            @sh "s_pct=\(.pct // 0)",
+            @sh "s_used=\(.used // 0)",
+            @sh "s_limit=\(.limit // 0)"
+        ')"
         s_pct_int=$(printf "%.0f" "$s_pct")
         s_bar=$(make_bar "$s_pct_int")
-        seg="${LABEL}usage/h${RESET} ${BLUE}${s_bar} ${s_pct_int}% ${s_label} ${DIM}(${s_used}/${s_limit})${RESET}"
-        segments+=("$seg")
-    elif { [ -z "$provider_id" ] || [ "$provider_id" = "anthropic" ]; } && [ -n "$daily_reset_str" ]; then
-        # Fallback — Anthropic mode (direct or via proxy)
-        seg="${LABEL}usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET} ${DIM}(${daily_reset_str})${RESET}"
+        seg="${LABEL}Usage/d${RESET} ${BLUE}${s_bar} ${s_pct_int}%${RESET} ${DIM}(${s_used}/${s_limit})${RESET}"
         segments+=("$seg")
     elif [ -z "$provider_id" ] || [ "$provider_id" = "anthropic" ]; then
-        seg="${LABEL}usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET}"
-        if [ -n "$daily_reset_str" ]; then
-            if [ "$daily_reset_approx" = "1" ]; then
-                seg+=" ${DIM}(~${daily_reset_str})${RESET}"
-            else
-                seg+=" ${DIM}(${daily_reset_str})${RESET}"
-            fi
-        fi
+        seg="${LABEL}Usage/d${RESET} ${BLUE}${usage_5h_bar} ${usage_5h_int}%${RESET}"
+        [ -n "$daily_reset_str" ] && seg+=" ${DIM}(${daily_reset_str})${RESET}"
         segments+=("$seg")
     fi
 fi
 
-# usage/d — long window
+# Usage/W — long window
 show_long=$(show_el usage_long)
 [ -z "$show_long" ] && show_long=$(show_el weekly_limit)
 if [ "$show_long" = "1" ]; then
     if [ -n "$usage_long_json" ]; then
-        l_label=$(echo "$usage_long_json" | "$JQ" -r '.label // "rpd"')
-        l_pct=$(echo "$usage_long_json" | "$JQ" -r '.pct // 0')
-        l_used=$(echo "$usage_long_json" | "$JQ" -r '.used // 0')
-        l_limit=$(echo "$usage_long_json" | "$JQ" -r '.limit // 0')
+        eval "$(echo "$usage_long_json" | "$JQ" -r '
+            @sh "l_pct=\(.pct // 0)",
+            @sh "l_used=\(.used // 0)",
+            @sh "l_limit=\(.limit // 0)"
+        ')"
         l_pct_int=$(printf "%.0f" "$l_pct")
         l_bar=$(make_bar "$l_pct_int")
         dim_suffix=""
         [ "$stale" = "1" ] && dim_suffix="${DIM}"
-        seg="${dim_suffix}${LABEL}usage/d${RESET} ${BLUE}${l_bar} ${l_pct_int}% ${l_label} ${DIM}(${l_used}/${l_limit})${RESET}"
-        segments+=("$seg")
-    elif { [ -z "$provider_id" ] || [ "$provider_id" = "anthropic" ]; } && [ -n "$weekly_reset_str" ]; then
-        seg="${LABEL}usage/w${RESET} ${BLUE}${usage_7d_bar} ${usage_7d_int}%${RESET} ${DIM}(${weekly_reset_str})${RESET}"
+        seg="${dim_suffix}${LABEL}Usage/W${RESET} ${BLUE}${l_bar} ${l_pct_int}%${RESET} ${DIM}(${l_used}/${l_limit})${RESET}"
         segments+=("$seg")
     elif [ -z "$provider_id" ] || [ "$provider_id" = "anthropic" ]; then
-        seg="${LABEL}usage/w${RESET} ${BLUE}${usage_7d_bar} ${usage_7d_int}%${RESET}"
-        if [ -n "$weekly_reset_str" ]; then
-            seg+=" ${DIM}(${weekly_reset_str})${RESET}"
-        fi
+        seg="${LABEL}Usage/W${RESET} ${BLUE}${usage_7d_bar} ${usage_7d_int}%${RESET}"
+        [ -n "$weekly_reset_str" ] && seg+=" ${DIM}(${weekly_reset_str})${RESET}"
         segments+=("$seg")
     fi
 fi
 
 # Token counter
 if [ "$(show_el tokens)" = "1" ]; then
-  segments+=("${LABEL}tok${RESET} ${GREEN}${tok_in_fmt}${RESET}${DIM}/${RESET}${RED}${tok_out_fmt}${RESET}")
+  segments+=("${LABEL}Tok${RESET} ${GREEN}${tok_in_fmt}${RESET}${DIM}/${RESET}${RED}${tok_out_fmt}${RESET}")
 fi
 
-# Cost — auto-shown for Extra Usage and API mode (overrides config); config controls normal visibility
-if [ "$is_extra_usage" = "1" ] || [ "$is_api_mode" = "1" ] || [ "$(show_el cost)" = "1" ]; then
-  if [ -n "$extra_balance_str" ]; then
+# Cost / Extra Usage balance
+_show_cost=$(show_el cost)
+_show_extra_ctx=$(show_el extra_ctx)
+if [ "$is_api_mode" = "1" ] || [ "$_show_cost" = "1" ] || [ "$_show_extra_ctx" = "1" ]; then
+  if [ -n "$extra_balance_str" ] && [ "$_show_extra_ctx" = "1" ]; then
     # Extra Usage subscription: show credit balance (spent/total) in magenta
     segments+=("${MAGENTA}${extra_balance_str}${RESET}")
-  else
-    # Normal or API: show session cost
-    segments+=("${LABEL}\$${cost_fmt}${RESET}")
+  elif [ "$is_api_mode" = "1" ] || [ "$_show_cost" = "1" ]; then
+    segments+=("${LABEL}Cost \$${cost_fmt}${RESET}")
   fi
 fi
 
 # Requests counter
 if [ "$(show_el requests)" = "1" ]; then
-  segments+=("${BLUE}🔧 ${requests} req${RESET}")
+  segments+=("${BLUE}🔧 ${requests} Req${RESET}")
 fi
 
 # Lines added/removed
@@ -470,12 +457,12 @@ fi
 
 # Claude process RAM
 if [ "$(show_el claude_ram)" = "1" ] && [ "$claude_ram_mb" -gt 0 ]; then
-  segments+=("${ram_color}mem: ${claude_ram_mb} MB${RESET}")
+  segments+=("${ram_color}MEM ${claude_ram_mb} MB${RESET}")
 fi
 
 # System RAM
 if [ "$(show_el ram)" = "1" ] && [ "$ram_pct" -gt 0 ]; then
-  segments+=("${LABEL}ram${RESET} ${ram_color}${ram_bar} ${ram_used_gb}/${ram_total_gb}G${RESET}")
+  segments+=("${LABEL}RAM${RESET} ${ram_color}${ram_bar} ${ram_used_gb}/${ram_total_gb}G${RESET}")
 fi
 
 # Join segments with separator (no trailing │)
