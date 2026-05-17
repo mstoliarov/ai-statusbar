@@ -36,4 +36,4 @@ CURRENT_PID=$PPID
     .requests_count = ((.requests_count // 0) + 1) | .lines_count = ((.lines_count // 0) + $lines)
   end |
   .tool.name = $name | .tool.status = "done"' \
-  "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
+  "$STATE" > "${STATE}.$$" && mv "${STATE}.$$" "$STATE"

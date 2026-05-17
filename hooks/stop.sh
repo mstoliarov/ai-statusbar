@@ -13,7 +13,7 @@ MODEL=$(echo "$INPUT" | "$JQ" -r '.model // ""')
 
 # Ensure state file exists to avoid jq errors
 if [ ! -f "$STATE" ]; then
-echo '{}' > "$STATE"
+  echo '{}' > "$STATE"
 fi
 
 # Token counts — read from state.json (saved by statusline.sh from live JSON, more reliable than Stop payload)
@@ -47,12 +47,12 @@ if [[ "$STOP_HOOK_ACTIVE" != "true" && -f "$STATE" ]]; then
   if [ "${S_PCT:-0}" -ge 95 ] && [ "$S_FIRED" != "$S_RESET" ]; then
     REASONS+=("session ${S_PCT}%")
     "$JQ" --argjson r "$S_RESET" '.autosave.session_fired_for = $r' \
-      "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
+      "$STATE" > "${STATE}.$$" && mv "${STATE}.$$" "$STATE"
   fi
   if [ "${W_PCT:-0}" -ge 99 ] && [ "$W_FIRED" != "$W_RESET" ]; then
     REASONS+=("weekly ${W_PCT}%")
     "$JQ" --argjson r "$W_RESET" '.autosave.weekly_fired_for = $r' \
-      "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
+      "$STATE" > "${STATE}.$$" && mv "${STATE}.$$" "$STATE"
   fi
 
   if [ "${#REASONS[@]}" -gt 0 ]; then
@@ -135,4 +135,4 @@ NOW_ISO=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
    .usage.today_tokens = $today_tok |
    .usage.week_start = $week_start |
    .usage.week_tokens = $week_tok' \
-  "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
+  "$STATE" > "${STATE}.$$" && mv "${STATE}.$$" "$STATE"

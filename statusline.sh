@@ -8,7 +8,7 @@ JQ="$HOME/bin/jq"
 input=$(cat)
 
 # ANSI colors
-RESET="\033[0m"
+RESET="\033[0m\033[49m"
 BOLD="\033[1m"
 CYAN="\033[36m"
 GREEN="\033[32m"

@@ -11,4 +11,4 @@ if [[ -z "$1" || -z "$2" ]]; then
   exit 1
 fi
 
-"$JQ" --argjson v "$2" "$1 = \$v" "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
+"$JQ" --argjson v "$2" "$1 = \$v" "$STATE" > "${STATE}.$$" && mv "${STATE}.$$" "$STATE"
