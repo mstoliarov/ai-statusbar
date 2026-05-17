@@ -335,7 +335,7 @@ show_el() {
 if [ "$tok_total" -gt 0 ] && [ -f "$STATE" ]; then
   "$JQ" --argjson ti "$tok_in" --argjson to "$tok_out" \
     '.tokens.input = $ti | .tokens.output = $to' \
-    "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
+    "$STATE" > "${STATE}.$$" && mv "${STATE}.$$" "$STATE"
 fi
 
 # Save rate_limits snapshot for stop.sh autosave trigger
@@ -344,7 +344,7 @@ if [ -f "$STATE" ]; then
         --argjson wp "$usage_7d_int" --argjson wr "$seven_day_resets_at" \
         '.rate_limits.session = {pct: $sp, resets_at: $sr} |
          .rate_limits.weekly  = {pct: $wp, resets_at: $wr}' \
-        "$STATE" > "${STATE}.tmp" && mv "${STATE}.tmp" "$STATE"
+        "$STATE" > "${STATE}.$$" && mv "${STATE}.$$" "$STATE"
 fi
 
 # --- Build output ---
