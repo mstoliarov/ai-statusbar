@@ -338,15 +338,6 @@ if [ "$tok_total" -gt 0 ] && [ -f "$STATE" ]; then
     "$STATE" > "${STATE}.$$" && mv "${STATE}.$$" "$STATE"
 fi
 
-# Save rate_limits snapshot for stop.sh autosave trigger
-if [ -f "$STATE" ]; then
-  "$JQ" --argjson sp "$usage_5h_int" --argjson sr "$five_hour_resets_at" \
-        --argjson wp "$usage_7d_int" --argjson wr "$seven_day_resets_at" \
-        '.rate_limits.session = {pct: $sp, resets_at: $sr} |
-         .rate_limits.weekly  = {pct: $wp, resets_at: $wr}' \
-        "$STATE" > "${STATE}.$$" && mv "${STATE}.$$" "$STATE"
-fi
-
 # --- Build output ---
 SEP="${DIM} │ ${RESET}"
 segments=()
