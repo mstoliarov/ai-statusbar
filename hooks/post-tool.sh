@@ -7,7 +7,7 @@ JQ="$HOME/bin/jq"
 STATE="$HOME/.ai-statusbar/state.json"
 
 INPUT=$(cat)
-TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // ""')
+TOOL_NAME=$(echo "$INPUT" | "$JQ" -r '.tool_name // ""')
 
 [[ -z "$TOOL_NAME" ]] && exit 0
 
