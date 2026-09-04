@@ -88,3 +88,32 @@ name — although usage data does exist behind its `/usage` command and the
 `/statusbar` in Hermes is a hardcoded in-memory visibility toggle
 (`cli.py`, `canonical == "statusbar"`); it takes no arguments and does not
 persist. Persist visibility via `display.statusbar` instead.
+
+## Verified by running both TUIs
+
+Checked live on 2026-09-04, not just by reading config.
+
+**Order matters in Codex — items truncate from the end.** The status line is
+one line; everything past the terminal width is cut with `…`. Appending the
+usage metrics to the end of an 18-item array meant they never rendered. Put
+the metrics you actually watch first. Confirmed rendering after reordering:
+
+```
+~\.ai-statusbar · gpt-5.6-luna medium · Context 0% used · monthly 99% left · …
+```
+
+Note the rendered labels differ from the config ids — `context-used` renders
+as `Context 0% used`, and the limit items render as `monthly NN% left` on
+this plan.
+
+**Hermes fields only appear once they have a value.** On a fresh session the
+bar is nearly empty (`ctx --`, no tokens) no matter what the allowlist says —
+this is "no data yet", not a misconfiguration. After one completed turn:
+
+```
+⚕ nemotron-3-ultra-550b-a... │ 14.1K/1M │ [░░░░░░░░░░] 1% │ ◷ 25.7s │ ↑ 1 t/s │ 37s │ ⏲ 27s │ ✓ 1s │ Σ14.1K
+```
+
+`◷` is `latency`, `↑ N t/s` is `tps`, `Σ` is the opt-in `total_tokens`.
+A decisive way to test whether the allowlist is being read at all: set
+`fields: [model]` and confirm every other segment disappears.
