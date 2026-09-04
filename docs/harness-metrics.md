@@ -106,6 +106,17 @@ Note the rendered labels differ from the config ids — `context-used` renders
 as `Context 0% used`, and the limit items render as `monthly NN% left` on
 this plan.
 
+**Do not wire this project's hooks into Codex or Hermes.** `hooks/post-tool.sh`
+and `hooks/stop.sh` exist only to feed `state.json`, which only `statusline.sh`
+reads — i.e. only Claude Code and Agy. A unification pass had copied them into
+`~/.codex/hooks.json`, where they spawned a bash process on every single tool
+call to write a file nothing reads. On a memory-starved Windows box those
+spawns fail outright and Codex reports `hook exited with code 1`, with the
+underlying error being `windows sandbox failed: SetTokenInformation
+(TokenDefaultDacl) failed: 1344` — "no more memory is available for security
+information updates". That is the OS refusing to allocate, not a bug in the
+hook: the hooks run fine standalone. Removed them from Codex.
+
 **Hermes fields only appear once they have a value.** On a fresh session the
 bar is nearly empty (`ctx --`, no tokens) no matter what the allowlist says —
 this is "no data yet", not a misconfiguration. After one completed turn:
