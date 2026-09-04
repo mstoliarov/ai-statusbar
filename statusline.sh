@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
-# Claude Code inline status line — progress bar + counters + usage
+# Inline status line — progress bar + counters + usage.
 # Part of ai-statusbar plugin: https://github.com/mstoliarov/ai-statusbar
-# Receives JSON via stdin from Claude Code
+# Receives JSON via stdin from a statusLine-compatible harness (Claude Code,
+# or Agy/Antigravity — both send the same "cwd/model/context_window" shape;
+# Agy additionally sets .product="antigravity" and reports rate limits under
+# .quota instead of .rate_limits, handled below).
 
 export PATH="$HOME/bin:$PATH"
 JQ="$HOME/bin/jq"
@@ -80,8 +83,22 @@ eval "$("$JQ" -r '
   @sh "seven_day_resets_at=\(.rate_limits.seven_day.resets_at // 0)",
   @sh "cost=\(.cost.total_cost_usd // 0)",
   @sh "lines_added=\(.cost.total_lines_added // 0)",
-  @sh "lines_removed=\(.cost.total_lines_removed // 0)"
+  @sh "lines_removed=\(.cost.total_lines_removed // 0)",
+  @sh "product=\(.product // "")"
 ' <<< "$input")"
+
+# Agy/Antigravity quota fields — hyphenated keys ("3p-weekly") don't survive
+# jq string-literal interpolation cleanly on Windows argv, so read them via
+# --arg instead of embedding the literal key in the program text.
+eval "$("$JQ" -r --arg k1 "3p-weekly" --arg k2 "gemini-weekly" '
+  @sh "quota_3p_frac=\(.quota[$k1].remaining_fraction // -1)",
+  @sh "quota_3p_reset_s=\(.quota[$k1].reset_in_seconds // 0)",
+  @sh "quota_gemini_frac=\(.quota[$k2].remaining_fraction // -1)",
+  @sh "quota_gemini_reset_s=\(.quota[$k2].reset_in_seconds // 0)"
+' <<< "$input")"
+
+is_antigravity=0
+[ "$product" = "antigravity" ] && is_antigravity=1
 
 # --- Detect Extra Usage and API mode ---
 # Extra Usage: context window expands to 1M tokens
@@ -125,6 +142,32 @@ fi
 # Override ctx_size only if proxy returned a positive integer
 if [[ "$ctx_size_override" =~ ^[0-9]+$ ]] && [ "$ctx_size_override" -gt 0 ]; then
   ctx_size="$ctx_size_override"
+fi
+
+# --- Agy/Antigravity: infer provider from model name, map .quota to usage windows ---
+# Agy has no proxy and no .rate_limits — it reports two weekly quota pools by
+# backend class (3p-weekly = third-party models, gemini-weekly = Gemini) as
+# remaining_fraction, not a used_percentage. There is no short/daily window.
+if [ "$is_antigravity" = "1" ]; then
+  if [ -z "$provider_id" ]; then
+    model_lc=$(echo "$model" | tr '[:upper:]' '[:lower:]')
+    case "$model_lc" in
+      *claude*) provider_id="anthropic"; provider_display="ANT"; provider_color_name="magenta" ;;
+      *gemini*) provider_id="google";    provider_display="GEM"; provider_color_name="blue" ;;
+      *gpt*|*oss*) provider_id="openai"; provider_display="OAI"; provider_color_name="green" ;;
+      *)        provider_id="agy";       provider_display="AGY"; provider_color_name="cyan" ;;
+    esac
+  fi
+  if [ -z "$usage_short_json" ] && [ "$(awk "BEGIN{print ($quota_3p_frac >= 0)}")" = "1" ]; then
+    pct=$(awk "BEGIN{printf \"%.0f\", (1 - $quota_3p_frac) * 100}")
+    usage_short_json=$("$JQ" -nc --argjson pct "$pct" --arg reset "$(fmt_duration "$quota_3p_reset_s")" \
+      '{pct:$pct, used:$pct, limit:100, reset:$reset}')
+  fi
+  if [ -z "$usage_long_json" ] && [ "$(awk "BEGIN{print ($quota_gemini_frac >= 0)}")" = "1" ]; then
+    pct=$(awk "BEGIN{printf \"%.0f\", (1 - $quota_gemini_frac) * 100}")
+    usage_long_json=$("$JQ" -nc --argjson pct "$pct" --arg reset "$(fmt_duration "$quota_gemini_reset_s")" \
+      '{pct:$pct, used:$pct, limit:100, reset:$reset}')
+  fi
 fi
 
 # now_epoch needed here for extra usage cache logic and later for rate limit reset times
@@ -354,13 +397,15 @@ fi
 # Map provider color name → ANSI escape
 provider_ansi() {
   case "$1" in
-    orange) printf '\033[38;5;208m' ;;
-    white)  printf '\033[37m' ;;
-    cyan)   printf '\033[36m' ;;
-    blue)   printf '\033[34m' ;;
-    red)    printf '\033[31m' ;;
-    yellow) printf '\033[33m' ;;
-    *)      printf '\033[0m' ;;
+    orange)  printf '\033[38;5;208m' ;;
+    white)   printf '\033[37m' ;;
+    cyan)    printf '\033[36m' ;;
+    blue)    printf '\033[34m' ;;
+    red)     printf '\033[31m' ;;
+    yellow)  printf '\033[33m' ;;
+    green)   printf '\033[32m' ;;
+    magenta) printf '\033[35m' ;;
+    *)       printf '\033[0m' ;;
   esac
 }
 
@@ -393,17 +438,23 @@ render_usage_window() {
   local label="$1" json="$2"
   local fb_bar="$3" fb_pct="$4" fb_reset="$5"
   local apply_stale_dim="$6"
-  local u_pct u_used u_limit u_pct_int u_bar dim_prefix=""
+  local u_pct u_used u_limit u_reset u_pct_int u_bar dim_prefix=""
   if [ -n "$json" ]; then
     eval "$(echo "$json" | "$JQ" -r '
       @sh "u_pct=\(.pct // 0)",
       @sh "u_used=\(.used // 0)",
-      @sh "u_limit=\(.limit // 0)"
+      @sh "u_limit=\(.limit // 0)",
+      @sh "u_reset=\(.reset // "")"
     ')"
     u_pct_int=$(printf "%.0f" "$u_pct")
     u_bar=$(make_bar "$u_pct_int")
     [ "$apply_stale_dim" = "1" ] && [ "$stale" = "1" ] && dim_prefix="${DIM}"
-    segments+=("${dim_prefix}${LABEL}${label}${RESET} ${BLUE}${u_bar} ${u_pct_int}%${RESET} ${DIM}($(fmt_num "$u_used")/$(fmt_num "$u_limit"))${RESET}")
+    if [ -n "$u_reset" ]; then
+      # Percentage-of-quota source (e.g. Agy) — show reset countdown, not a token ratio
+      segments+=("${dim_prefix}${LABEL}${label}${RESET} ${BLUE}${u_bar} ${u_pct_int}%${RESET} ${DIM}(${u_reset})${RESET}")
+    else
+      segments+=("${dim_prefix}${LABEL}${label}${RESET} ${BLUE}${u_bar} ${u_pct_int}%${RESET} ${DIM}($(fmt_num "$u_used")/$(fmt_num "$u_limit"))${RESET}")
+    fi
   elif [ -z "$provider_id" ] || [ "$provider_id" = "anthropic" ]; then
     local seg="${LABEL}${label}${RESET} ${BLUE}${fb_bar} ${fb_pct}%${RESET}"
     [ -n "$fb_reset" ] && seg+=" ${DIM}(${fb_reset})${RESET}"
@@ -414,8 +465,11 @@ render_usage_window() {
 # Usage/d — short window (from /status when available, else Anthropic 5h fallback)
 show_short=$(show_el usage_short)
 [ -z "$show_short" ] && show_short=$(show_el daily_limit)  # backward compat
+label_short="Usage/d"; label_long="Usage/w"
+[ "$is_antigravity" = "1" ] && label_short="3P/wk" && label_long="Gem/wk"
+
 if [ "$show_short" = "1" ]; then
-  render_usage_window "Usage/d" "$usage_short_json" \
+  render_usage_window "$label_short" "$usage_short_json" \
     "$usage_5h_bar" "$usage_5h_int" "$daily_reset_str" 0
 fi
 
@@ -423,7 +477,7 @@ fi
 show_long=$(show_el usage_long)
 [ -z "$show_long" ] && show_long=$(show_el weekly_limit)
 if [ "$show_long" = "1" ]; then
-  render_usage_window "Usage/w" "$usage_long_json" \
+  render_usage_window "$label_long" "$usage_long_json" \
     "$usage_7d_bar" "$usage_7d_int" "$weekly_reset_str" 1
 fi
 
@@ -432,10 +486,10 @@ if [ "$(show_el tokens)" = "1" ]; then
   segments+=("${LABEL}Tok${RESET} ${GREEN}${tok_in_fmt}${RESET}${DIM}/${RESET}${RED}${tok_out_fmt}${RESET}")
 fi
 
-# Cost / Extra Usage balance
+# Cost / Extra Usage balance — not available from Agy's statusLine JSON, skip
 _show_cost=$(show_el cost)
 _show_extra_ctx=$(show_el extra_ctx)
-if [ "$is_api_mode" = "1" ] || [ "$_show_cost" = "1" ] || [ "$_show_extra_ctx" = "1" ]; then
+if [ "$is_antigravity" != "1" ] && { [ "$is_api_mode" = "1" ] || [ "$_show_cost" = "1" ] || [ "$_show_extra_ctx" = "1" ]; }; then
   if [ -n "$extra_balance_str" ] && [ "$_show_extra_ctx" = "1" ]; then
     # Extra Usage subscription: show credit balance (spent/total) in magenta
     segments+=("${MAGENTA}${extra_balance_str}${RESET}")
@@ -444,13 +498,15 @@ if [ "$is_api_mode" = "1" ] || [ "$_show_cost" = "1" ] || [ "$_show_extra_ctx" =
   fi
 fi
 
-# Requests counter
-if [ "$(show_el requests)" = "1" ]; then
+# Requests counter — from state.json, populated by Claude Code's own
+# PostToolUse/Stop hooks; not wired up for Agy, so skip rather than show a
+# stale/foreign count
+if [ "$is_antigravity" != "1" ] && [ "$(show_el requests)" = "1" ]; then
   segments+=("${BLUE}🔧 ${requests} Req${RESET}")
 fi
 
-# Lines added/removed
-if [ "$(show_el lines)" = "1" ]; then
+# Lines added/removed — same state.json caveat as requests, above
+if [ "$is_antigravity" != "1" ] && [ "$(show_el lines)" = "1" ]; then
   segments+=("${LABEL}📝${RESET} ${GREEN}+${lines_added}${RESET}/${RED}-${lines_removed}${RESET}")
 fi
 
