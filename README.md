@@ -1,6 +1,16 @@
 # ai-statusbar
 
 Real-time status bar for [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code).
+Also works unmodified in **Agy/Antigravity**, which wires its own `statusLine`
+setting to `statusline.sh` — see `statusline.sh`'s handling of
+`.product == "antigravity"` for its different rate-limit/provider shape.
+
+Codex and Hermes are **not** targets of this project: both already ship their
+own native, built-in status line (Codex: `[tui] status_line` in
+`~/.codex/config.toml` plus a built-in `/statusline` command; Hermes: a
+hardcoded `/statusbar` toggle plus `/battery`). Neither exposes a bash-hook
+seam this project could plug into, so there is nothing here for them to
+adopt.
 
 ```
 .ai-statusbar [master*] │ Sonnet 4.6 │ ctx ████░░░░░░ 49% / 200k │ usage/d █████░░░░░ 53% (3h 20m) │ usage/w ████░░░░░░ 42% (2d 10h) │ tok 3k/63k │ $2.75 │ 🔧 8 req │ 📝 +10/-3 │ ram ███████░░░ 12.5/16G
