@@ -40,6 +40,17 @@ Also present in its JSON but not currently rendered: `plan_tier`,
 
 ## Codex
 
+**Dropped from the `statusbar` skill on 2026-09-05, by the user's decision.**
+Codex renders a single-line native status line and cannot host a bar in the
+shape Claude Code's has, so driving it from this project's skill bought
+nothing. The skill is no longer linked into `~/.codex/skills`, and
+`source-command-statusbar` sits in `skipEntries` for codex in
+`~/.agents/unify.json`. The `[tui] status_line` configured in
+`~/.codex/config.toml` was deliberately left in place and keeps rendering —
+nothing was reverted. To change its fields, edit that file directly, using the
+item ids below. The rest of this section stays as the verified reference for
+that.
+
 Native only — no bash-hook seam. Configured as an **ordered array** of item
 ids; unknown ids are ignored with an "Ignored invalid status line" warning
 rather than an error. Codex also ships its own `/statusline` picker.
@@ -88,6 +99,38 @@ name — although usage data does exist behind its `/usage` command and the
 `/statusbar` in Hermes is a hardcoded in-memory visibility toggle
 (`cli.py`, `canonical == "statusbar"`); it takes no arguments and does not
 persist. Persist visibility via `display.statusbar` instead.
+
+### Which config file Hermes actually reads (2026-09-06)
+
+`CLI_CONFIG = load_cli_config()` reads **`$HERMES_HOME/config.yaml`**, and
+`HERMES_HOME` defaults to `~/.hermes`. A profile only enters the picture when
+the process is started with `--profile <name>` or an explicit `HERMES_HOME`,
+which re-homes it to `~/.hermes/profiles/<name>` (`hermes_cli/profiles.py`,
+`get_active_profile_name`). The launcher at `~/.local/bin/hermes` sets
+neither, so a plain `hermes` run reads `~/.hermes/config.yaml` — fields
+written only into a profile's `config.yaml` are silently ignored there. Keep
+both files in sync, or set `HERMES_HOME` in the launcher.
+
+### Fields are also gated by terminal width and by state
+
+Reading `hermes_cli/cli_status_bar_mixin.py` (`_status_bar_segments`), the
+allowlist is necessary but not sufficient — each field has its own condition,
+so a listed field that never appears is usually correct behaviour:
+
+| Field | Shows when |
+|---|---|
+| `model`, `duration` | always (any width; `duration` moves ahead of `goal` under 52 cols) |
+| `context_pct`, `cache_hit`, `compressions`, `bg_*` | width ≥ 52 |
+| `context_detail`, `latency`, `tps`, `prompt_elapsed`, `idle_since`, `total_tokens` | width ≥ 76 |
+| `cache_hit`, `latency`, `tps` | plus a non-empty measurement in the snapshot |
+| `compressions`, `bg_tasks`, `bg_processes`, `bg_subagents` | plus a non-zero count |
+| `goal`, `focus`, `yolo`, `stash` | plus the corresponding session state being active |
+| `stash` | styled (prompt_toolkit) renderer only — absent from the plain-text bar |
+| `battery` | plus `display.battery: true` |
+| `total_tokens` | plus an explicit `fields` list (never shown by default) |
+
+So the widest tier starts at 76 columns; below that a third of the fields are
+unreachable no matter what the config says.
 
 ## Verified by running both TUIs
 
